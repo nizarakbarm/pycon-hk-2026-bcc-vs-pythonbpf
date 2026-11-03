@@ -1,0 +1,2025 @@
+<!doctype html>
+<html lang="en" data-theme="tech" style="--bg:#fef5e9;--fg:#000000;--muted:#595959;--accent:#2f559a;--good:#0f6a49;--warn:#d71920;--card:#ffffff;--line:#e6ddd0;--fs:28px;--lh:1.45">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>eBPF with Python: runtime C vs ahead-of-time — PyCon HK 2026</title>
+<style>
+/* ---------------------------------------------------------------------------
+   THEME  "PyCon HK 2026"  — taken from "Slide Template - PyCon HK 2026.pptx"
+     theme1.xml:  lt1/paper #fef5e9 · dk1/ink #000000 · dk2 #595959
+                  accent1 red #d71920 · accent2 blue #2f559a
+     master:      Arial (major + minor)   ·  art: image1.png / image2.png / image3.png
+   Colour rule — one hue per job, never decoration:
+     red  = BCC      blue = Python-BPF     yellow = "don't stop here"
+     green = the neutral finding (same 1 ms timer)   slate = scaffolding
+   --good / --warn are used only for good news / something to flag.
+--------------------------------------------------------------------------- */
+:root{
+  --red:#d71920; --paper2:#f7efe2; --yellow:#ffd343; --red-tint:#fdeceb;
+  --blue-tint:#eaf0fa; --green-tint:#e8f3ee;
+  --sans:Arial,"Helvetica Neue",Helvetica,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --w:1280px; --h:720px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:#111;color:var(--fg);font-family:var(--sans);font-size:var(--fs);line-height:var(--lh);overflow:hidden}
+
+/* ---------- stage: authored at 1280x720, scaled once, centred ---------- */
+.stage{position:fixed;left:0;top:0;width:1280px;height:720px;transform-origin:top left;background:#111}
+.slide{
+  position:absolute;inset:0;width:var(--w);height:var(--h);
+  background:var(--bg);color:var(--fg);padding:62px 44px 76px;
+  display:none;flex-direction:column;gap:14px;overflow:hidden;
+  /* template geometry: content box x=44..1236, title band y=62..142 */
+}
+.slide::before{                       /* template art, one layer per slide kind */
+  content:"";position:absolute;inset:0;z-index:0;pointer-events:none;
+  background-repeat:no-repeat;background-size:1280px 720px;
+}
+.slide[data-art="title"]::before{background-image:url("images/tpl-title.png")}
+.slide[data-art="section"]::before{background-image:url("images/tpl-section.png")}
+.slide[data-art="content"]::before{background-image:url("images/tpl-content.png")}
+.slide>*{position:relative;z-index:1}
+.slide.active{display:flex}
+.slide.center{align-items:center;justify-content:center;text-align:center}
+.slide.split{display:none;grid-template-columns:1fr 1fr;gap:36px;align-items:center;padding:62px 44px 76px}
+.slide.split.active{display:grid}
+
+/* ---------- chrome ---------- */
+.hdr{flex:none;display:flex;align-items:baseline;gap:14px;height:80px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.hdr .eyebrow{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--red);font-weight:700}
+.hdr .who{font-size:14px;color:var(--muted);padding-left:14px;border-left:1px solid #d8cfc0}
+.hdr .ttl{font-size:38px;font-weight:400;line-height:1.12;letter-spacing:-.01em;color:var(--fg)}
+.foot{flex:none;display:flex;align-items:center;gap:12px;height:42px;border-top:1px solid var(--line);padding-top:8px;margin-top:auto;margin-left:150px;font-size:13px;color:var(--muted)}
+.foot .q{margin-left:auto;display:flex;align-items:center;gap:8px}
+.foot .presswrap{margin-left:auto;display:flex;align-items:center}
+.body{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;gap:18px}
+
+/* progress spine: one tick per slide, current one red */
+.spine{position:absolute;left:0;right:0;bottom:0;height:18px;z-index:9;pointer-events:none;background:rgba(254,245,233,.94);border-top:1px solid #e6ddd0}
+.spine .t{position:absolute;top:7px;height:4px;width:4px;border-radius:1px;background:#c9c0b2}
+.spine .t.sec{background:#f5f1e8}
+.spine .t.on{top:4px;height:10px;background:var(--red)}
+.spine .t.on.sec{background:var(--yellow)}
+.counter{position:absolute;right:26px;bottom:26px;font-size:15px;font-weight:700;color:#000;font-family:var(--mono);z-index:12;background:#fef5e9;padding:3px 9px;border-radius:6px;border:1px solid #d8cfc0;letter-spacing:.02em}
+
+/* ---------- type ---------- */
+h1{font-size:56px;line-height:1.07;letter-spacing:-.022em;font-weight:800}
+h2{font-size:40px;line-height:1.15;font-weight:800;letter-spacing:-.01em}
+h3{font-size:26px;line-height:1.2;font-weight:800}
+.lead{font-size:22px;line-height:1.45}
+.muted{color:var(--muted)}
+.sub{font-size:19px;color:var(--muted);line-height:1.45}
+.overline{font-size:15px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);font-weight:800}
+.mono{font-family:var(--mono)}
+.good{color:var(--good)}.warn{color:var(--warn)}.acc{color:var(--accent)}
+.bcc{color:var(--red);font-weight:800}.pbpf{color:var(--accent);font-weight:800}
+a{color:var(--accent)}
+
+/* ---------- reveal: the "pick a step" interaction ---------- */
+.rv{opacity:0;transform:translateY(8px);transition:opacity .26s ease,transform .26s ease}
+.rv.on{opacity:1;transform:none}
+.press{display:none;align-items:center;gap:6px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--red);font-weight:800;border:1px solid var(--red);border-radius:999px;padding:2px 10px}
+.press.on{display:inline-flex;animation:bob 1.5s ease-in-out infinite}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
+
+/* ---------- cards, tags ---------- */
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 24px}
+.card h3{margin-bottom:6px}
+.card p{font-size:18px;color:var(--muted);line-height:1.45}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.tag{display:inline-block;font-size:12px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+  padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--paper2);color:var(--muted)}
+
+/* ---------- ask the room ---------- */
+.ask{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:24px}
+.ask .q{font-size:44px;font-weight:800;line-height:1.2;letter-spacing:-.01em;max-width:1050px}
+.pause{font-size:14px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.verdict{font-size:32px;font-weight:800;line-height:1.25;max-width:1050px}
+
+/* ---------- number rows ---------- */
+.rows{display:flex;flex-direction:column;gap:12px}
+.nrow{display:grid;grid-template-columns:200px 300px 1fr;align-items:center;gap:18px;
+  padding:12px 4px;border-bottom:1px solid var(--line)}
+.nrow .nm{font-size:19px;font-weight:700}
+.nrow .nm small{display:block;font-size:14px;font-weight:400;color:var(--muted);line-height:1.3}
+.nrow .v{font-family:var(--mono);font-size:29px;font-weight:700;font-variant-numeric:tabular-nums}
+.nrow .say{font-size:18px;line-height:1.35}
+
+/* ---------- horizontal bar rows ---------- */
+.bars{display:flex;flex-direction:column;gap:14px}
+.brow{display:grid;grid-template-columns:170px 1fr 132px;align-items:center;gap:16px}
+.bval{font-family:var(--mono);font-size:17px;font-weight:700;color:var(--fg);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.bval small{display:block;font-size:12px;font-weight:400;color:var(--muted);font-family:var(--sans)}
+.brow .lbl{font-size:17px;font-weight:800;text-align:right}
+.track{position:relative;height:42px;background:#ece2d2;border:1px solid #ddd2c1;border-radius:8px}
+.fill{position:absolute;left:0;top:0;bottom:0;border-radius:8px;transition:width .7s cubic-bezier(.2,.7,.2,1)}
+.fill.c-bcc{background:var(--red)}
+.fill.c-pbpf{background:var(--accent)}
+.fill.c-slate{background:#8a8a8a}
+
+/* ---------- three-term figure ---------- */
+.fig{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.fig .seg{border:1px solid var(--line);border-radius:14px;background:var(--card);padding:16px 20px;min-height:150px;
+  display:flex;flex-direction:column;gap:6px;transition:opacity .3s,border-color .3s}
+.fig .seg.big{border:2px solid var(--red);background:#fdeceb}
+.fig .seg.big .h,.fig .seg.big .n{color:var(--red)}
+.fig .seg .h{font-family:var(--mono);font-size:24px;font-weight:700}
+.fig .seg .n{font-size:19px;font-weight:700}
+.fig .seg .d{font-size:15px;color:var(--muted);line-height:1.4}
+.fig .seg.latent{opacity:.32}   /* unused on this slide */
+
+/* ---------- code ---------- */
+pre{background:#000000;color:#e6edf3;border-radius:12px;padding:16px 18px;overflow:hidden;
+  font-family:var(--mono);white-space:pre;tab-size:4}
+pre .c{color:#8b98ad}
+pre .k{color:#ff9aa2}
+pre .s{color:#ffd343}
+pre .f{color:#95bdff}
+pre .d{color:#c7b8ff}
+pre .hl{background:rgba(255,211,67,.18);border-radius:4px;color:#fff;font-weight:700}
+.codehead{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:14px;color:var(--muted)}
+.codehead .tag{background:var(--card)}
+.codepair{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+
+/* ---------- tables ---------- */
+table{width:100%;border-collapse:collapse;font-size:19px}
+th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:.08em;font-weight:800}
+td.mono,td .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ---------- callout ---------- */
+.callout{border-left:6px solid var(--yellow);background:var(--card);border-radius:0 12px 12px 0;padding:14px 20px;font-size:20px;line-height:1.4}
+
+/* ---------- section divider ---------- */
+/* section art: flags at x<200 and x>1000, chevron below y=500 -> keep text in the middle gap */
+.slide.section{justify-content:center;align-items:flex-start;padding:0 300px 150px 210px;gap:8px}
+.slide.section .num{font-family:var(--mono);font-size:88px;line-height:1;color:var(--red);font-weight:700}
+.slide.section h2{color:var(--fg);font-size:58px;font-weight:700;max-width:760px;letter-spacing:-.02em;line-height:1.06}
+.slide.section .sub{color:var(--muted);font-size:21px;max-width:700px}
+
+/* ---------- title ---------- */
+.hero{display:grid;grid-template-columns:1fr 190px;gap:34px;align-items:start;width:100%;max-width:992px}
+.hero .kicker{font-size:15px;letter-spacing:.2em;text-transform:uppercase;color:var(--red);font-weight:800}
+.hero h1{font-size:44px;line-height:1.12;margin:6px 0 12px}
+.portrait{width:174px;height:228px;border-radius:16px;object-fit:cover;object-position:50% 12%;
+  border:1px solid var(--line);transform:rotate(1.5deg);box-shadow:0 14px 34px rgba(23,32,51,.18);justify-self:center}
+
+/* ---------- route map (close) ---------- */
+.route{display:flex;flex-direction:column;gap:10px;width:100%}
+.rt{display:grid;grid-template-columns:56px 1fr 180px;gap:16px;align-items:center;padding:10px 18px;
+  background:var(--card);border:1px solid var(--line);border-radius:12px}
+.rt .n{font-family:var(--mono);font-size:19px;font-weight:700;color:var(--muted)}
+.rt .t{font-size:20px;font-weight:700}
+.rt .t small{font-size:15px;color:var(--muted);font-weight:400;margin-left:8px}
+.rt .r{font-size:14px;color:var(--muted);text-align:right;font-family:var(--mono)}
+.rt.done .n{color:var(--good)}
+.rt.now{border-color:var(--red);background:var(--red-tint)}
+.rt.now .n{color:var(--red)}
+
+/* ---------- speaker notes ---------- */
+.notes{display:none}
+#notes-panel{position:fixed;left:0;right:0;bottom:18px;max-height:42vh;overflow:auto;padding:14px 26px 18px;
+  background:#0f172b;color:#e6ddd0;border-top:3px solid var(--yellow);font-size:17px;line-height:1.5;
+  transform:translateY(120%);transition:transform .22s;z-index:11;font-family:var(--sans)}
+#notes-panel.open{transform:none}
+#notes-panel .nhead{display:flex;gap:16px;align-items:baseline;margin-bottom:6px}
+#notes-panel .nhead b{color:#fff;font-size:15px}
+#notes-panel .nhead .hint{font-size:13px;color:#a6b6cb}
+#notes-panel p{margin:.36em 0}
+#notes-panel .say{color:#fff;font-size:1.06em}
+#notes-panel .cue{color:#ffd343;font-weight:700}
+#notes-panel .warn{color:#ff9aa2;font-weight:600}
+#notes-panel .mono{color:#c7b8ff;font-family:var(--mono)}
+
+/* ---------- code stage: a self-contained stand-in for slidev-addon-livecode ----
+   Tabs + line pointer + syntax colour, no framework, no runtime, no network.
+   Lines come from data/live-code/* verbatim; JS numbers and highlights them. */
+.cs{display:flex;flex-direction:column;min-height:0;flex:1;background:#172033;border-radius:12px;
+    overflow:hidden;outline:none}
+.cs:focus-visible{box-shadow:0 0 0 3px var(--yellow)}
+.cs-body{flex:1;min-height:0;position:relative}
+.cs-body.split{display:grid;grid-template-columns:1fr 1fr}
+.cs-body.split .cs-pane{position:relative}
+.cs-body.split .cs-pane + .cs-pane{border-left:1px solid #2b3a52}
+.cs-name{position:sticky;top:0;z-index:2;background:#0f172b;color:#93a4bb;font:600 11px/1 var(--mono);padding:6px 12px;letter-spacing:.03em;border-bottom:1px solid #22304a}
+.cs-body.split .cs-line{font-size:11.5px;padding:0 10px;gap:10px}
+.cs-body.split .cs-line .n{width:22px}
+.cs-pane{overflow:auto;padding:8px 0}
+.cs-body:not(.split) .cs-pane{position:absolute;inset:0}
+.cs-line{display:flex;gap:14px;padding:0 16px;font-family:var(--mono);font-size:12px;line-height:1.4;
+  white-space:pre;color:#e6edf3;cursor:pointer}
+.cs-line .n{width:30px;text-align:right;color:#5b6b80;flex:none;user-select:none}
+.cs-line:hover{background:rgba(255,255,255,.04)}
+.cs-line.out{opacity:.3}
+.cs-line.out:hover{opacity:.75}
+.cs-line.cur{background:rgba(255,211,67,.15);box-shadow:inset 3px 0 0 var(--yellow)}
+.cs-line.cur .n{color:var(--yellow)}
+.cs-line .c{color:#8b98ad}.cs-line .k{color:#ff9aa2}.cs-line .s{color:#ffd343}
+.cs-line .f{color:#95bdff}.cs-line .d{color:#c7b8ff}.cs-line .num{color:#c7b8ff}
+.cs-foot{display:flex;gap:16px;align-items:center;flex:none;background:#0f172b;color:#8b98ad;
+  font-size:11.5px;padding:5px 12px;letter-spacing:.04em}
+.cs-foot .pos{margin-left:auto;font-family:var(--mono)}
+
+/* ---------- on-screen controller (OSC), cloned from marp-cli ---------- */
+.osc{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:40;display:flex;
+  align-items:center;gap:2px;padding:4px;border-radius:8px;background:rgba(20,20,20,.92);
+  border:1px solid #35434f;box-shadow:0 6px 20px rgba(0,0,0,.45);
+  font-family:var(--sans);opacity:0;pointer-events:none;transition:opacity .25s}
+.osc[aria-hidden="false"]{opacity:1;pointer-events:auto}
+.osc button{font:600 12px/1 var(--sans);color:#dfe7ef;background:transparent;border:0;border-radius:5px;
+  padding:7px 11px;cursor:pointer;white-space:nowrap}
+.osc button:hover:not(:disabled){background:#2b3a4d}
+.osc button:disabled{opacity:.35;cursor:default}
+.osc button.exit{color:#ffd343}
+.osc [data-osc="page"]{font:600 12px/1 var(--mono);color:#93a4bb;padding:0 10px;white-space:nowrap}
+@media print{.osc,.overview{display:none!important}}
+
+/* ---------- overview view (o) ---------- */
+.overview{position:fixed;inset:0;z-index:39;background:rgba(10,12,16,.96);display:none;
+  overflow:auto;padding:26px}
+.overview[aria-hidden="false"]{display:block}
+.ov-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}
+.ov-cell{position:relative;aspect-ratio:16/9;overflow:hidden;border-radius:6px;cursor:pointer;
+  border:2px solid transparent;background:#000}
+.ov-cell:hover{border-color:#5b6b80}
+.ov-cell.on{border-color:#d71920}
+.ov-cell .ov-scale{position:absolute;left:0;top:0;width:1280px;height:720px;transform-origin:top left}
+.ov-cell .ov-num{position:absolute;left:6px;bottom:5px;z-index:3;font:700 11px/1 var(--mono);
+  color:#fff;background:rgba(0,0,0,.7);padding:3px 6px;border-radius:4px}
+
+/* ============================================================================
+   PRESENTER VIEW — mechanism cloned from marp-cli's Bespoke template
+   (src/templates/bespoke/presenter/*): the presenter is the SAME file loaded
+   with ?view=presenter&sync=<key>; windows stay in step through a localStorage
+   key + the `storage` event; `p` opens the window at 85% of the current size.
+   Layout is their grid: current | dragbar | next / info | dragbar | note.
+   ============================================================================ */
+.controls{position:absolute;right:132px;bottom:26px;display:flex;gap:8px;z-index:12}
+.ctl{font:600 12px/1 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:#000;
+  background:#fef5e9;border:1px solid #d8cfc0;border-radius:6px;padding:7px 12px;cursor:pointer}
+.ctl:hover{background:#f7efe2}
+.ctl.on{background:#d71920;border-color:#d71920;color:#fff}
+@media print{.controls{display:none!important}}
+
+body[data-view="presenter"]{background:#111;overflow:hidden}
+body[data-view="presenter"] .spine,
+body[data-view="presenter"] .controls,
+body[data-view="presenter"] .counter,
+body[data-view="presenter"] #notes-panel{display:none}
+body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-origin:top left}
+
+.pv{position:fixed;inset:0;display:grid;
+  grid-template:
+    'current dragbar next' minmax(140px,1fr)
+    'current dragbar note' 2fr
+    'info    dragbar note' 3.1em;
+  grid-template-columns:minmax(3px,var(--pv-split,66%)) 0 minmax(3px,1fr);
+  font-family:var(--sans);font-size:14px;color:#e6edf3}
+
+.pv-current{grid-area:current;position:relative;overflow:hidden;background:#111}
+.pv-current .stage{position:absolute!important}
+
+.pv-drag{grid-area:dragbar;background:#d71920;cursor:col-resize;width:6px;margin-left:-3px;
+  position:relative;z-index:10;opacity:0;transition:opacity .4s linear .1s}
+.pv-drag:hover,.pv-drag.active{opacity:1;transition-delay:0s}
+
+.pv-next{grid-area:next;background:#181818;position:relative;overflow:hidden;cursor:pointer}
+.pv-next .pv-scaler{position:absolute;left:20px;top:20px;transform-origin:top left}
+.pv-next-empty{display:grid;place-items:center;height:100%;color:#5b6b80;font-size:13px}
+
+.pv-note{grid-area:note;background:#181818;position:relative;z-index:1;overflow:hidden}
+.pv-note-body{position:absolute;inset:0;margin:18px 20px;overflow:auto;font-size:calc(1.02em * var(--pv-note-scale,1));
+  line-height:1.55;color:#e6edf3;scrollbar-width:thin}
+.pv-note-body p{margin:.5em 0}
+.pv-note-body ul{margin:.5em 0 .5em 1.15em}
+.pv-note-body .mono{font-family:var(--mono);color:#c7b8ff;font-size:.94em}
+.pv-note-btns{position:absolute;right:12px;bottom:12px;display:flex;gap:4px;padding:6px;
+  background:rgba(0,0,0,.65);border-radius:6px;opacity:0;transition:opacity .2s;pointer-events:none}
+.pv-note:hover .pv-note-btns,.pv-note-btns:focus-within{opacity:1;pointer-events:auto}
+.pv-note-btns button{width:26px;height:26px;border-radius:4px;border:1px solid #33445f;background:#22304a;
+  color:#cbd7e6;font:700 14px/1 var(--mono);cursor:pointer}
+
+.pv-info{grid-area:info;display:flex;align-items:center;justify-content:center;gap:10px;
+  padding:0 10px;border-top:1px solid #24324a;background:#141414;overflow:hidden}
+.pv-info button{font:600 12px/1 var(--sans);letter-spacing:.04em;color:#cbd7e6;background:#22304a;
+  border:1px solid #33445f;border-radius:5px;padding:6px 10px;cursor:pointer;white-space:nowrap}
+.pv-info button:hover{background:#2b3d5c}
+.pv-info button:disabled{opacity:.35;cursor:default}
+.pv-info .pv-page{min-width:74px;text-align:center;font-family:var(--mono);font-weight:700;color:#fff}
+.pv-info .pv-clock{margin-left:auto;font-family:var(--mono);font-size:13px;color:#93a4bb;white-space:nowrap}
+.pv-info .pv-timer{font-family:var(--mono);font-size:13px;color:#ffd343;cursor:pointer;white-space:nowrap}
+
+/* ---------- print ---------- */
+@media print{
+  @page{size:1280px 720px;margin:0}
+  body{background:none;overflow:visible}
+  /* template art is a background image: force it into the print */
+  .slide,.slide::before,body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .slide::before{position:absolute!important}
+  .stage{position:relative;transform:none!important;left:0!important;top:0!important;background:none}
+  .slide{position:relative;display:flex!important;page-break-after:always;break-after:page;break-inside:avoid}
+  .slide.split{display:grid!important}
+  .rv{opacity:1!important;transform:none!important;transition:none!important}
+  .fill{transition:none!important}
+  .press,.spine,.counter,#notes-panel,.notes{display:none!important}
+}
+</style>
+</head>
+<body>
+<div class="stage">
+
+<!-- ================= 1 · TITLE ================= -->
+<section class="slide active" data-art="title" data-notes="<p>Welcome. Today we compare two Python eBPF frameworks — not just which is faster, but WHY. We measured every layer: startup syscalls, per-event CPU, memory, profiling, bytecode, JIT instructions. Both frameworks load a BPF program into the kernel — every performance difference lives in the userspace glue around it.</p>">
+  <div class="hdr"><span class="eyebrow">PyCon HK 2026</span><span class="muted">Hong Kong · 14–15 November 2026</span></div>
+  <div class="body" style="justify-content:flex-start;padding:208px 0 0 204px">
+    <div class="hero">
+      <div>
+        <p class="kicker">Python × eBPF</p>
+        <h1>eBPF with Python:<br>runtime C vs ahead-of-time</h1>
+        <p class="lead"><span class="bcc">BCC</span> compiles C at runtime. <span class="pbpf">Python-BPF</span> compiles Python ahead of time. We measured both to 2 million events.</p>
+      </div>
+      <img class="portrait" src="images/nizar_pycon.png" alt="Portrait of Nizar Akbar Meilani at PyCon">
+    </div>
+  </div>
+  <div class="foot"><b>Nizar Akbar Meilani</b> · DomaiNesia, Yogyakarta<span class="q muted">slides + dataset → github.com/nizarakbarm</span></div>
+</section>
+
+<!-- ================= 2 · ABOUT ================= -->
+<section class="slide" data-art="content" data-notes="<p>Quick intro. I'm a systems engineer at DomaiNesia — a hosting and cloud provider in Indonesia — building Python tooling for eBPF observability. My approach is data over assumptions, shaped by CTF reverse engineering. This talk is that approach applied to eBPF tooling.</p>">
+  <div class="hdr"><span class="eyebrow">About</span><span class="who">Nizar Akbar Meilani</span></div>
+  <div class="body">
+    <div class="grid3">
+      <div class="card"><h3>Day job</h3><p>Systems engineer at <b>DomaiNesia</b> — hosting and cloud, Yogyakarta, Indonesia.</p></div>
+      <div class="card"><h3>Focus</h3><p>eBPF <i>from Python</i> — kernel observability without writing C.</p></div>
+      <div class="card"><h3>Back at PyCon HK</h3><p>Third year running. Twice at APAC, once at PyCon ID.</p></div>
+    </div>
+    <p class="sub">This talk is one habit from CTF work: <b>measure every layer, trust no layer</b>.</p>
+  </div>
+  <div class="foot"><span>github.com/nizarakbar</span><span class="q muted">github.com/nizarakbarm/pycon-hk-2026-bcc-vs-pythonbpf</span></div>
+</section>
+
+<!-- ================= 3 · THE FOUR QUESTIONS ================= -->
+<section class="slide" data-art="content" data-notes="<p class='say'>Every talk about two tools is really one question: which do I ship?</p><p>Mine has four parts — startup, per event, the waiting, and what you lose. I'll answer all four with numbers, then tell you the one that decides it.</p>">
+  <div class="hdr"><span class="eyebrow">Today</span><span class="who">one question, four parts</span></div>
+  <div class="body">
+    <div class="route">
+      <div class="rt"><span class="n" style="color:var(--red)">01</span><span class="t">Which starts faster?<small>from process launch to a loaded BPF program</small></span><span class="r">startup</span></div>
+      <div class="rt"><span class="n" style="color:var(--accent)">02</span><span class="t">Which costs less per event?<small>same program, same workload, 2 million events</small></span><span class="r">per event</span></div>
+      <div class="rt"><span class="n" style="color:var(--good)">03</span><span class="t">Who does the waiting?<small>the loop that reads events back into Python</small></span><span class="r">the wait</span></div>
+      <div class="rt"><span class="n" style="color:#b58a00">04</span><span class="t">What do you lose?<small>speed is not the only axis</small></span><span class="r">the limits</span></div>
+    </div>
+  </div>
+  <div class="foot"><span class="muted">Every number in this deck is CPU time, not wall — slide 23 explains why.</span></div>
+</section>
+
+<!-- ================= 4 · ONE KERNEL, TWO TOOLS ================= -->
+<section class="slide" data-art="content" data-notes="<p>This is the frame for everything that follows. Two boxes: user space and kernel. Both tools sit in the first box, and both use one path in the second box: the same bpf() syscall, the same verifier, the same JIT compiler, the same hook, the same maps. The hook is a tracepoint because the workload is sys_enter_execve. Hold the shape: every measurement in this talk is taken in one of those two boxes, and once the kernel path is shared, any per-event difference has to come from user space. That is what the next slides measure, and it is why the deny gap later is a framework limit and not a kernel one.</p>">
+  <div class="hdr"><span class="eyebrow">Context</span><span class="who">both tools, one kernel path</span></div>
+  <div class="body" style="align-items:center">
+    <svg viewBox="0 0 1120 300" style="width:100%;height:296px">
+      <rect x="10" y="8" width="1100" height="118" rx="14" fill="#ffffff" stroke="#e6ddd0"/>
+      <text x="34" y="38" style="font-size:14px;font-weight:800;letter-spacing:.14em;fill:#595959">USER SPACE</text>
+      <rect x="150" y="54" width="330" height="56" rx="10" fill="#fdeceb" stroke="#d71920" stroke-width="2"/>
+      <text x="315" y="90" text-anchor="middle" style="font-size:23px;font-weight:800;fill:#d71920">Python + BCC</text>
+      <rect x="640" y="54" width="330" height="56" rx="10" fill="#eaf0fa" stroke="#2f559a" stroke-width="2"/>
+      <text x="805" y="90" text-anchor="middle" style="font-size:23px;font-weight:800;fill:#2f559a">Python + Python-BPF</text>
+      <rect x="10" y="164" width="1100" height="128" rx="14" fill="#000000"/>
+      <text x="34" y="194" style="font-size:14px;font-weight:800;letter-spacing:.14em;fill:#a6b6cb">KERNEL — shared by both</text>
+      <g style="font-size:19px;font-weight:700;fill:#f5f1e8">
+        <rect x="54" y="212" width="180" height="52" rx="9" fill="#2b2b2b"/><text x="144" y="245" text-anchor="middle">bpf() syscall</text>
+        <rect x="264" y="212" width="150" height="52" rx="9" fill="#2b2b2b"/><text x="339" y="245" text-anchor="middle">verifier</text>
+        <rect x="444" y="212" width="120" height="52" rx="9" fill="#2b2b2b"/><text x="504" y="245" text-anchor="middle">JIT</text>
+        <rect x="594" y="212" width="170" height="52" rx="9" fill="#2b2b2b"/><text x="679" y="245" text-anchor="middle">tracepoint</text>
+        <rect x="794" y="212" width="120" height="52" rx="9" fill="#2b2b2b"/><text x="854" y="245" text-anchor="middle">maps</text>
+      </g>
+      <path d="M315 110 L315 136 L144 136 L144 212" fill="none" stroke="#8a8a8a" stroke-width="2" stroke-dasharray="5 5"/>
+      <path d="M805 110 L805 136 L854 136 L854 212" fill="none" stroke="#8a8a8a" stroke-width="2" stroke-dasharray="5 5"/>
+      <text x="560" y="133" text-anchor="middle" style="font-size:15px;fill:#595959">any per-event difference must live up here</text>
+    </svg>
+    <p class="lead" style="text-align:center">Same tracepoint, same verifier, same maps → <b>the difference is in the glue</b>.</p>
+  </div>
+  <div class="foot"><span class="muted">Workload: <span class="mono">sys_enter_execve</span></span></div>
+</section>
+
+<!-- ================= 5 · HOW A PROGRAM BECOMES BYTECODE ================= -->
+<section class="slide" data-art="content" data-notes="<p>Two architectures, one destination. BCC embeds C strings inside Python, forks clang at runtime, and compiles against kernel headers. Python-BPF parses a decorated Python function into an AST, lowers it to llvmlite IR, and compiles with llc — all ahead of time. Both paths end at the same place: a BPF program loaded into the kernel. The node at the end is the point of the slide: both paths load a BPF program into the kernel. Do not claim the bytecode is identical.</p>">
+  <div class="hdr"><span class="eyebrow">The one difference</span><span class="who">how a program becomes bytecode</span></div>
+  <div class="body">
+    <svg viewBox="0 0 1120 262" style="width:100%;height:258px">
+      <rect x="6" y="4" width="1108" height="112" rx="14" fill="#fdeceb" stroke="#d71920"/>
+      <text x="28" y="32" style="font-size:14px;font-weight:800;letter-spacing:.1em;fill:#d71920">BCC — COMPILES AT RUNTIME</text>
+      <g style="font-size:18px;font-weight:700;fill:#000000">
+        <rect x="28" y="46" width="170" height="52" rx="9" fill="#fff"/><text x="113" y="79" text-anchor="middle">C string in Python</text>
+        <rect x="248" y="46" width="140" height="52" rx="9" fill="#fff"/><text x="318" y="79" text-anchor="middle">clang -E</text>
+        <rect x="438" y="46" width="120" height="52" rx="9" fill="#fff"/><text x="498" y="79" text-anchor="middle">clang</text>
+        <rect x="608" y="46" width="180" height="52" rx="9" fill="#fff"/><text x="698" y="79" text-anchor="middle">BPF bytecode</text>
+      </g>
+      <g style="font-size:22px;fill:#d71920;font-weight:800"><text x="206" y="80">→</text><text x="398" y="80">→</text><text x="566" y="80">→</text></g>
+      <rect x="6" y="146" width="1108" height="112" rx="14" fill="#eaf0fa" stroke="#2f559a"/>
+      <text x="28" y="174" style="font-size:14px;font-weight:800;letter-spacing:.1em;fill:#2f559a">PYTHON-BPF — AHEAD OF TIME</text>
+      <g style="font-size:18px;font-weight:700;fill:#000000">
+        <rect x="28" y="188" width="170" height="52" rx="9" fill="#fff"/><text x="113" y="221" text-anchor="middle">@bpf function</text>
+        <rect x="248" y="188" width="140" height="52" rx="9" fill="#fff"/><text x="318" y="221" text-anchor="middle">AST</text>
+        <rect x="438" y="188" width="120" height="52" rx="9" fill="#fff"/><text x="498" y="221" text-anchor="middle">llvmlite IR</text>
+        <rect x="608" y="188" width="180" height="52" rx="9" fill="#fff"/><text x="698" y="221" text-anchor="middle">BPF bytecode</text>
+      </g>
+      <g style="font-size:22px;fill:#2f559a;font-weight:800"><text x="206" y="222">→</text><text x="398" y="222">→</text><text x="566" y="222">→</text></g>
+      <rect x="840" y="34" width="250" height="192" rx="12" fill="#000000"/>
+      <text x="965" y="116" text-anchor="middle" style="font-size:20px;font-weight:800;fill:#f5f1e8">BPF program</text>
+      <text x="965" y="144" text-anchor="middle" style="font-size:20px;font-weight:800;fill:#f5f1e8">in the kernel</text>
+      <text x="965" y="176" text-anchor="middle" style="font-size:15px;fill:#a6b6cb">same destination</text>
+      <path d="M794 72 L840 108" stroke="#d71920" stroke-width="2"/>
+      <path d="M794 214 L840 166" stroke="#2f559a" stroke-width="2"/>
+    </svg>
+    <div class="grid2">
+      <div class="callout" style="border-color:var(--red)">BCC needs <b>clang + kernel headers</b> on the host, every run.</div>
+      <div class="callout" style="border-color:var(--accent)">Python-BPF needs <b>neither</b> once built.</div>
+    </div>
+  </div>
+  <div class="foot"><span class="muted">This is exactly part 1 — startup — which is where we start.</span></div>
+</section>
+
+<!-- ================= 6 · DIVIDER 01 ================= -->
+<section class="slide section" data-sec="1" data-art="section" data-notes="<p class='say'>Part one: startup. Watch the clock.</p>">
+  <p class="num">01</p>
+  <h2>Which starts faster?</h2>
+  <p class="sub">From process launch to a loaded BPF program.</p>
+</section>
+
+<!-- ================= 7 · WHAT WE RUN ================= -->
+<section class="slide" data-art="content" data-notes="<p>One workload for the talk: sys_enter_execve, driven by 2M fork-plus-execve pairs, on the map_1_perf_timed_count program - a HashMap counter plus a perf event. The trigger is sequential: fork, wait for the child, then fork again. That is why one event costs 0.7-0.9 ms and 2M events take 25-30 minutes. The host is vmnono with three CPUs. Both frameworks run the same program, so any difference belongs to the framework, not the program.</p>">
+  <div class="hdr"><span class="eyebrow">Setup</span><span class="who">one workload, held constant</span></div>
+  <div class="body">
+    <table>
+      <tr><th>item</th><th>value</th></tr>
+      <tr><td>tracepoint</td><td class="mono">sys_enter_execve</td></tr>
+      <tr><td>trigger</td><td>2,000,000 <span class="mono">fork</span> + <span class="mono">execve</span> pairs (C binary)</td></tr>
+      <tr><td>program</td><td><span class="mono">map_1_perf_timed_count.py</span> <span class="muted">— map counter + perf event</span></td></tr>
+      <tr><td>host</td><td>vmnono (<span class="mono">nono1</span>), 3 CPUs</td></tr>
+    </table>
+    <p class="lead"><b>Both frameworks run the same program</b> — so any difference is the framework, not the program.</p>
+  </div>
+  <div class="foot"><span class="muted">Sequential trigger: fork, wait, fork — about 0.7–0.9 ms per event.</span></div>
+</section>
+
+<!-- ================= 7b · THE PROGRAM WE MEASURE (code stage) ================= -->
+<section class="slide" data-art="content" data-single data-notes="<p>Everything above, side by side, and read the last row carefully because the two are closer than they look.</p><p>Python-BPF does NOT have its own userspace read loop. It calls the same open_perf_buffer shape and then perf.poll(), which reaches libbpf perf_buffer__poll. So the API is the same and the poll is the same idea. What differs is underneath: BCC implements the wait itself, libbpf uses an epoll set. That is the perf fd slide, where strace shows poll against epoll_wait.</p><p>Do not say Python-BPF has a different polling API. It does not. Same call, different implementation underneath.</p><p>Keep this table in mind — the rest of the talk is measuring what those spelling differences cost at two million events, and where they cost nothing at all.</p>">
+  <div class="hdr"><span class="eyebrow">Setup · the program</span><span class="who">both frameworks, whole files</span></div>
+  <div class="body">
+    <div class="cs" tabindex="0">
+      <div class="cs-body split">
+        <div class="cs-pane" data-lang="c" data-src="src-bcc" data-from="28" data-to="46" data-name="BCC · C inside a Python string"></div>
+        <div class="cs-pane" data-lang="py" data-src="src-pbpf" data-from="36" data-to="54" data-name="Python-BPF · decorated Python"></div>
+      </div>
+      <div class="cs-foot"><span>↑ ↓ move · click to pin · scroll for the rest of the file</span><span class="pos" data-pos></span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 8 · STARTUP NUMBERS ================= -->
+<section class="slide" data-art="content" data-single data-notes="<p>The test data. BCC needs 0.4 s to start. Python-BPF needs 0.02 s. That is the start-time difference the two waits cover. The two rows below are the mechanism. BCC compiles the C in its own process, so it shows no child. Python-BPF forks one child, the llc compiler. At init BCC reads 20,768 blocks of kernel headers. Python-BPF reads 160. Ranges: BCC 0.375-0.580 s, Python-BPF 0.020-0.027 s.</p>">
+  <div class="hdr"><span class="eyebrow">Part 1 · startup</span><span class="who">init CPU, seconds</span></div>
+  <div class="body">
+    <div class="rows">
+      <div class="nrow"><div class="nm">BCC<small>runtime compile</small></div><div class="v bcc">0.45 s</div><div class="say">Fork clang, preprocess, compile.</div></div>
+      <div class="nrow"><div class="nm">Python-BPF<small>ahead of time</small></div><div class="v pbpf">0.02 s</div><div class="say">Load an object that already exists.</div></div>
+    </div>
+    <p class="lead">Python-BPF starts about <b>22× faster</b>. <span class="muted">Ranges: BCC 0.375–0.580 s · Python-BPF 0.020–0.027 s.</span></p>
+  </div>
+  <div class="foot"><span class="muted">Init CPU, 2M count arm, <span class="mono">results/unprofiled</span>.</span></div>
+</section>
+
+<!-- ================= 9 · STARTUP WHY ================= -->
+<section class="slide" data-art="content" data-notes="<p class='say'>Why? The work moved earlier.</p><p><span class='cue'>Reveal 1:</span> BCC forks clang in its own process, so it shows no child. Python-BPF forks one child, llc, and that child exits — that's where its compile time goes.</p><p><span class='cue'>Reveal 2:</span> at init BCC reads 20,768 blocks of kernel headers. Python-BPF reads 160.</p><p class='warn'>So the startup number is a trade, not a free win: compile once ahead of time, or compile every launch.</p>">
+  <div class="hdr"><span class="eyebrow">Part 1 · startup</span><span class="who">where the 0.45 s goes</span></div>
+  <div class="body">
+    <table>
+      <tr><th>at init</th><th>BCC</th><th>Python-BPF</th></tr>
+      <tr><td>child process</td><td class="mono">none</td><td class="mono">llc</td></tr>
+      <tr class="rv"><td>header blocks read</td><td class="mono warn">20,768</td><td class="mono good">160</td></tr>
+    </table>
+    <p class="lead rv">BCC compiles the C <b>in its own process</b>. Python-BPF hands compilation to a child and ships a finished object.</p>
+    <p class="callout rv">The 0.02 s is not free compile — it is compile that happened <b>before</b> the run.</p>
+  </div>
+  <div class="foot"><span class="muted">blocks = 512-byte reads at init · <span class="mono">time -v</span>, 2M count arm.</span><span class="presswrap"><span class="press">press →</span></span></div>
+</section>
+
+<!-- ================= 10 · DIVIDER 02 ================= -->
+<section class="slide section" data-sec="2" data-art="section" data-notes="<p class='say'>Part two, the centrepiece: per event. Two million events through each, and we count every CPU second.</p>">
+  <p class="num">02</p>
+  <h2>Which costs less per event?</h2>
+  <p class="sub">Two million events, same program, CPU only.</p>
+</section>
+
+<!-- ================= 11 · CALLBACK VARIANTS ================= -->
+<section class="slide" data-art="content" data-notes="<p>Source: passes 1-3. Three callback variants of the same program. count prints one line, empty does nothing, print prints a constant. Only the callback changes between them.</p>">
+  <div class="hdr"><span class="eyebrow">Part 2 · method</span><span class="who">same program, only the callback changes</span></div>
+  <div class="body">
+    <div class="rows">
+      <div class="nrow"><div class="nm">count</div><div class="v" style="font-size:20px"><span class="tag">prints one line</span></div><div class="say">The realistic tool — this is the arm everything else is measured against.</div></div>
+      <div class="nrow"><div class="nm">empty</div><div class="v" style="font-size:20px"><span class="tag">does nothing</span></div><div class="say">No field read, no print. It gives us the <b>floor</b>: the cost of an event with no Python work.</div></div>
+      <div class="nrow"><div class="nm">print</div><div class="v" style="font-size:20px"><span class="tag">prints a constant</span></div><div class="say">Same output cost as count, none of the field reads.</div></div>
+    </div>
+    <p class="lead">One program shape, three bodies — <b>the kernel program never changes</b>.</p>
+  </div>
+  <div class="foot"><span class="muted">Source: passes 1–3, <span class="mono">results/unprofiled</span>.</span></div>
+</section>
+
+<!-- ================= 12 · DELIVERY CONTROL ================= -->
+<section class="slide" data-art="content" data-notes="<p>Source: 10-08, 10-10. All six 2M arms in results/unprofiled. The trigger sends N = 2,000,000, and both frameworks delivered every one, so nothing was lost and no arm printed LOST.</p><p>Watch the number. The log line reads 2000001, but that is the summary formula, not an event: both programs print sum(v + 1) per map entry, so the reported total is one above the counter. The map held 2,000,000. Say 2,000,000 on stage.</p><p>The harness warns and quarantines an arm that falls short of the trigger. Delivery is equal, so CPU is the only open question.</p>">
+  <div class="hdr"><span class="eyebrow">Part 2 · control</span><span class="who">nothing was lost</span></div>
+  <div class="body">
+    <div class="grid2">
+      <div class="card" style="border-top:5px solid var(--red)"><div class="tag">BCC</div><div class="mono" style="font-size:42px;font-weight:700;margin:8px 0 2px">2,000,000</div><p>events delivered — trigger sent 2,000,000</p></div>
+      <div class="card" style="border-top:5px solid var(--accent)"><div class="tag">Python-BPF</div><div class="mono" style="font-size:42px;font-weight:700;margin:8px 0 2px">2,000,000</div><p>events delivered — trigger sent 2,000,000</p></div>
+    </div>
+    <p class="lead" style="text-align:center">Delivery is equal → <b>CPU is the only open question</b>.</p>
+  </div>
+  <div class="foot"><span class="muted">All six 2M arms · log shows 2000001 = summary formula, not an event.</span></div>
+</section>
+
+<!-- ================= 13 · CPU AT SMALL N ================= -->
+<section class="slide" data-art="content" data-notes="<p>Two bars per N: BCC in the warm colour, Python-BPF in the cool one. The table gives the seconds and the ratio.</p><p>The bars at 1000 and 2000 are short against 2M, and that is real. Both frameworks are dominated by startup there. At 2M that startup has amortised, which is why these are per-event costs.</p><p>If someone asks about N equal to 100, we dropped it: its ratio was 7.38, the highest of all, because at 100 events BCC's runtime compile is 83 percent of its total. Keeping it would flatten the other bars.</p>">
+  <div class="hdr"><span class="eyebrow">Part 2 · result</span><span class="who">total CPU at small N</span></div>
+  <div class="body">
+        <div class="bars">
+      <div class="brow"><div class="lbl muted" style="font-size:15px">N = 1000</div><div class="track"><div class="fill c-bcc" data-w="78.1"></div></div><div class="bval bcc">0.625 s</div></div>
+      <div class="brow"><div class="lbl muted" style="font-size:15px"></div><div class="track"><div class="fill c-pbpf" data-w="15"></div></div><div class="bval pbpf">0.120 s</div></div>
+      <div class="brow"><div class="lbl muted" style="font-size:15px">N = 2000</div><div class="track"><div class="fill c-bcc" data-w="89.5"></div></div><div class="bval bcc">0.716 s</div></div>
+      <div class="brow"><div class="lbl muted" style="font-size:15px"></div><div class="track"><div class="fill c-pbpf" data-w="24.3"></div></div><div class="bval pbpf">0.194 s</div></div>
+      <div class="brow"><div class="lbl" style="font-size:13px;color:var(--muted);font-weight:400">axis</div>
+        <div style="font-size:13px;color:var(--muted)">total CPU, 0 to 0.8 s — the next slide puts the same two runs on a 0–145 s axis, where they vanish</div>
+        <div></div></div>
+    </div>
+    <p class="sub rv"><b>Ratio 5.2× at N=1000, 3.7× at N=2000.</b> &nbsp;<span class="muted">Axis: total CPU, 0–145 s (full scale shown on the next slide).</span></p>
+    <p class="lead rv">At N ≤ 2000, <b>startup dominates</b> — these are not per-event numbers.</p>
+  </div>
+  <div class="foot"><span class="muted">Total CPU, count variant, <span class="mono">results/unprofiled</span>.</span><span class="presswrap"><span class="press">press →</span></span></div>
+</section>
+
+<!-- ================= 14 · CPU AT 2M ================= -->
+<section class="slide" data-art="content" data-notes="<p>Read the 2M pair: BCC 134.568 seconds, Python-BPF 103.658. That is the result this talk rests on.</p><p>Data: results/unprofiled, count variant, [TIMING] Total CPU. CPU numbers, not wall.</p>">
+  <div class="hdr"><span class="eyebrow">Part 2 · result</span><span class="who">total CPU at 2M events</span></div>
+  <div class="body">
+    <svg viewBox="0 0 1120 330" style="width:100%;height:320px">
+      <line x1="70" y1="20" x2="70" y2="280" stroke="#d8cfc0"/>
+      <line x1="70" y1="280" x2="1080" y2="280" stroke="#d8cfc0"/>
+      <g style="font-size:15px;fill:#595959;stroke:#d8cfc0">
+        <line x1="70" y1="150" x2="1080" y2="150" stroke-dasharray="4 5"/>
+        <line x1="70" y1="20" x2="1080" y2="20" stroke-dasharray="4 5"/>
+        <text x="56" y="285" text-anchor="end" stroke="none">0</text>
+        <text x="56" y="155" text-anchor="end" stroke="none">72.5</text>
+        <text x="56" y="25" text-anchor="end" stroke="none">145 s</text>
+      </g>
+      <!-- BCC 241.3px, Python-BPF 185.9px: proportional to 134.568 / 103.658 on a 0-145 axis -->
+      <rect class="rv" x="250" y="280" width="150" height="0" fill="#d71920" rx="3"
+            data-h="241.3" data-w="241.3" data-kind="v"></rect>
+      <rect class="rv" x="500" y="280" width="150" height="0" fill="#2f559a" rx="3"
+            data-h="185.9" data-w="185.9" data-kind="v"></rect>
+      <text class="rv" x="325" y="27" text-anchor="middle" style="font-size:23px;font-weight:800;fill:#d71920">134.568 s</text>
+      <text class="rv" x="575" y="82" text-anchor="middle" style="font-size:23px;font-weight:800;fill:#2f559a">103.658 s</text>
+      <text x="325" y="312" text-anchor="middle" style="font-size:21px;font-weight:800;fill:#d71920">BCC</text>
+      <text x="575" y="312" text-anchor="middle" style="font-size:21px;font-weight:800;fill:#2f559a">Python-BPF</text>
+      <!-- annotation lives right of both bars: nothing overlaps a fill -->
+      <g class="rv" stroke="#000000" stroke-width="2">
+        <line x1="700" y1="39" x2="700" y2="94"/>
+        <line x1="694" y1="39" x2="706" y2="39"/>
+        <line x1="694" y1="94" x2="706" y2="94"/>
+      </g>
+      <text class="rv" x="716" y="62" style="font-size:22px;font-weight:800;fill:#000000">1.30× less CPU</text>
+      <text class="rv" x="716" y="86" style="font-size:15px;fill:#595959">30.9 s saved over 2M events</text>
+      <text class="rv" x="716" y="106" style="font-size:15px;fill:#595959">≈ 15 µs per event</text>
+      <text x="1060" y="150" text-anchor="end" style="font-size:14px;fill:#595959">axis: total CPU, 0–145 s</text>
+    </svg>
+    <p class="lead rv" style="text-align:center">Startup is 0.3% of a 1763 s run — <b>what is left is per-event cost</b>.</p>
+  </div>
+  <div class="foot"><span class="muted">Total CPU, count variant · wall 1763.6 s vs 1768.6 s.</span><span class="presswrap"><span class="press">press →</span></span></div>
+</section>
+
+<!-- ================= 15 · EMPTY CALLBACK ================= -->
+<section class="slide" data-art="content" data-single data-notes="<p>Data: results/unprofiled, 2M, abl_A_empty arm. The callback body is a bare pass. It prints nothing and reads no field. BCC still uses 103.3 s against Python-BPF's 84.0 s, a 19.2 s gap and a 1.23 ratio. Nothing in the callback can explain that gap, so the cost is in how each framework makes the call, not in what the callback does. That is the floor of the difference.</p>">
+  <div class="hdr"><span class="eyebrow">Part 2 · control</span><span class="who">callback body = <span class="mono">pass</span></span></div>
+  <div class="body">
+    <div class="rows">
+      <div class="nrow"><div class="nm bcc">BCC</div><div class="v warn">103.3 s</div><div class="say">with an empty callback</div></div>
+      <div class="nrow"><div class="nm pbpf">Python-BPF</div><div class="v good">84.0 s</div><div class="say">with an empty callback</div></div>
+    </div>
+    <p class="lead">The callback does nothing. BCC still spends <b>19.2 s more</b> — ratio 1.23.</p>
+    <p class="callout">So the cost is in <b>making the call</b>, not in what the callback does.</p>
+  </div>
+  <div class="foot"><span class="muted"><span class="mono">abl_A_empty</span>, 2M, <span class="mono">results/unprofiled</span>.</span></div>
+</section>
+
+<!-- ================= 16 · WHERE THE CPU GOES ================= -->
+<section class="slide" data-art="content" data-notes="<p>Data: results/perfrecord, 2M count arm, folded stacks summed by PMU cycles, frame matched anywhere on the stack. BCC carries the ctypes and libffi bridge on 84.0 percent of sampled cycles. Python-BPF carries it on zero percent, and its own binding pybind11 on 92.6 percent. clang is on 0.4 percent of BCC stacks, its runtime compile, and zero on Python-BPF. The same three names hold in the other arms: ctypes on 70.8 and 75.3 percent for BCC, pybind11 on 89.3 and 91.2 percent for Python-BPF. Percentages compare only within this pass. The measure is presence on the stack, not leaf time.</p><p>ATTRIBUTION, measured 2026-10-18. The libffi frame does NOT mean libbcc links libffi. libbcc has no libffi dependency at all:</p><p>  readelf -d /usr/lib64/libbcc.so.0.36.0 | grep NEEDED<br>    libclang-cpp.so.21.1, libLLVM.so.21.1, libelf.so.1,<br>    libbpf.so.1, libstdc++.so.6, libm.so.6, libgcc_s.so.1, libc.so.6<br>  grep -i ffi over the whole transitive closure -> empty.</p><p>libffi enters along a SEPARATE branch of the same Python process:</p><p>  python3<br>    +- bcc/__init__.py:17   import ctypes as ct<br>    |    +- _ctypes.cpython-313-x86_64-linux-gnu.so<br>    |         +- libffi.so.8          <-- enters here<br>    +- bcc/libbcc.py        ctypes.CDLL(&quot;libbcc.so.0&quot;)<br>         +- libbcc.so.0 -> libbpf.so.1</p><p>Evidence: ldd on the _ctypes .so shows libffi.so.8; ldd on libbcc.so shows no ffi. Two branches off CPython with no edge between them, which is why libffi is heavy in a process strace while absent from linkage.</p><p>State it that way: the libffi cost is IMPORT cost, not eBPF cost. It is paid by `import ctypes` at bcc/__init__.py line 17, before any BPF program exists. Same class as the libclang-cpp and libLLVM mmap cost, which is the larger part of the same trace.</p><p>Do NOT claim libffi is why the trace is large overall. libclang-cpp and libLLVM dominate it. The frame belongs on this slide as a cost, but it is not a libbcc dependency and it is not the bulk.</p>">
+  <div class="hdr"><span class="eyebrow">Part 2 · attribution</span><span class="who">perf record, 2M count arm</span></div>
+  <div class="body">
+        <div class="bars">
+      <div class="brow"><div class="lbl bcc">ctypes + libffi</div><div class="track"><div class="fill c-bcc" data-w="84"></div></div><div class="bval bcc">84.0%</div></div>
+      <div class="brow"><div class="lbl pbpf">pybind11</div><div class="track"><div class="fill c-pbpf rv" data-w="92.6"></div></div><div class="bval pbpf rv">92.6%</div></div>
+      <div class="brow"><div class="lbl muted">clang</div><div class="track"><div class="fill c-slate" data-w="0.4"></div></div><div class="bval muted">0.4%<small>the runtime compile</small></div></div>
+    </div>
+    <p class="lead rv"><span class="pbpf">Python-BPF binds with pybind11</span> · <span class="bcc">BCC binds with ctypes</span> — and Python-BPF pays the ctypes cost on <b>0%</b> of cycles.</p>
+  </div>
+  <div class="foot"><span class="muted">Share of PMU cycles with that frame anywhere on the stack · the same three names hold in the other arms.</span><span class="presswrap"><span class="press">press →</span></span></div>
+</section>
+
+<!-- ================= 17 · ASK: libffi DEPENDENCY? ================= -->
+<section class="slide" data-art="content" data-notes="<p class='say'>Pause here, because this is where I got it wrong the first time.</p><p class='cue'>Ask the room: that says ctypes and libffi on 84% of BCC's cycles. So — does libbcc depend on libffi?</p><p class='warn'>Wait. Let them answer. Then press.</p><p class='say'>It does not. libbcc has no libffi dependency at all. That frame is real, but it is not an eBPF cost.</p>">
+  <div class="hdr"><span class="eyebrow">Ask the room</span><span class="who">the pause you'll reuse at the limits</span></div>
+  <div class="body ask">
+    <p class="q">84% of BCC's cycles sit in <span class="mono">ctypes + libffi</span>.<br>So does <span class="bcc">libbcc</span> depend on <span class="mono">libffi</span>?</p>
+    <p class="pause">ask · pause · then press →</p>
+    <div class="rv" style="display:flex;flex-direction:column;align-items:center;gap:16px">
+      <p class="verdict"><span class="good">No.</span> Not one ffi library in its dependencies.</p>
+      <p class="sub">libffi arrives through <span class="mono">import ctypes</span>, in the same process, on a different path.</p>
+    </div>
+  </div>
+  <div class="foot"><span class="muted">Measured 2026-10-18 · <span class="mono">readelf -d /usr/lib64/libbcc.so.0.36.0 | grep NEEDED</span></span><span class="presswrap"><span class="press">press →</span></span></div>
+</section>
+
+<!-- ================= 18 · libffi IS IMPORT COST ================= -->
+<section class="slide" data-art="content" data-single data-notes="<p>The 84.0 percent ctypes and libffi frame on the previous slide must not be misread as libbcc depending on libffi. It does not.</p><p>Measured 2026-10-18. readelf -d on libbcc.so.0.36.0 lists eight NEEDED entries and not one is an ffi library: libclang-cpp.so.21.1, libLLVM.so.21.1, libelf.so.1, libbpf.so.1, libstdc++.so.6, libm.so.6, libgcc_s.so.1, libc.so.6. A grep for ffi across the whole transitive closure comes back empty.</p><p>libffi arrives by a different route, in the same process. CPython imports ctypes at bcc/__init__.py line 17 (the file reads `import ctypes as ct`), and the _ctypes extension module links libffi.so.8 directly. Separately, bcc/libbcc.py does ctypes.CDLL(&quot;libbcc.so.0&quot;), which pulls libbcc and through it libbpf. So the process has two branches: one that brings libffi for ctypes itself, one that brings the eBPF loader stack. There is no edge between them, which is exactly why libffi is heavy in a process strace while absent from any library linkage.</p><p>The consequences, and say them in this order.<br>First, the libffi cost is IMPORT cost, not eBPF cost. It is paid by `import ctypes` before any BPF program exists. Same class of cost as the libclang-cpp and libLLVM mapping, which is the larger part of the same trace.<br>Second, do NOT claim libffi is why the trace is large overall. libclang-cpp and libLLVM dominate it.<br>Third, the frame still belongs on the previous slide as a real cost of the BCC path in Python. It is just not a libbcc dependency.</p><p>Evidence commands, if asked: readelf -d /usr/lib64/libbcc.so.0.36.0 | grep NEEDED ; readelf -d on the _ctypes .so shows NEEDED libffi.so.8.</p>">
+  <div class="hdr"><span class="eyebrow">Part 2 · correction</span><span class="who">libffi is import cost, not eBPF cost</span></div>
+  <div class="body" style="gap:12px">
+    <div class="codehead"><span class="tag">01</span><span class="mono">readelf -d libbcc.so.0.36.0 | grep NEEDED</span><b style="color:var(--good)">— no ffi anywhere</b></div>
+    <pre style="font-size:17px;line-height:1.6"><span class="c">libclang-cpp.so.21.1   libLLVM.so.21.1   libelf.so.1    libbpf.so.1
+libstdc++.so.6         libm.so.6         libgcc_s.so.1  libc.so.6</span></pre>
+    <div class="codehead"><span class="tag">02</span>libffi enters on a <b style="color:var(--fg)">separate branch</b> of the same process</div>
+    <pre style="font-size:17px;line-height:1.6">python3
+ +- <span class="f">bcc/__init__.py:17</span>  <span class="k">import</span> ctypes <span class="k">as</span> ct
+ |   +- _ctypes...so -> libffi.so.8      <span class="hl">IMPORT cost</span>
+ +- <span class="f">bcc/libbcc.py</span>       ctypes.CDLL(<span class="s">"libbcc.so.0"</span>)
+     +- libbcc.so.0  -> libbpf.so.1      <span class="hl">eBPF cost</span></pre>
+    <p class="lead" style="text-align:center">Two branches off CPython — <b>no edge between them</b>.</p>
+  </div>
+  <div class="foot"><span class="muted">Measured 2026-10-18 · libclang-cpp + libLLVM are the larger part of the same trace, not libffi.</span></div>
+</section>
+
+<!-- ================= 19 · DIVIDER 03 ================= -->
+<section class="slide section" data-sec="3" data-art="section" data-notes="<p class='say'>Part three: the waiting. Two million per-event waits — and the surprise I got here, twice.</p>">
+  <p class="num">03</p>
+  <h2>Who does the waiting?</h2>
+  <p class="sub">The read loop — where I had it wrong twice.</p>
+</section>
+
+<!-- ================= 20 · ASK: SAME FDS? ================= -->
+<section class="slide" data-art="content" data-notes="<p class='say'>BCC's loop is perf_buffer_poll. Python-BPF's is perf.poll. Different names.</p><p class='cue'>Ask the room: same program, same tracepoint — are these two waiting on the same thing?</p><p>Wait for a show of hands. Most rooms say no, because the names differ. Then press.</p>">
+  <div class="hdr"><span class="eyebrow">Ask the room</span><span class="who">before the syscall trace</span></div>
+  <div class="body ask">
+    <p class="q"><span class="mono" style="font-size:34px">b.perf_buffer_poll(1)</span> &nbsp;vs&nbsp; <span class="mono" style="font-size:34px">perf.poll(1)</span><br>Are they waiting on the same thing?</p>
+    <p class="pause">ask · pause · then press →</p>
+    <div class="rv" style="display:flex;flex-direction:column;align-items:center;gap:16px">
+      <p class="verdict"><span class="good">Yes.</span> Same three perf buffer fds, same 1 ms timeout.</p>
+      <p class="sub">Only the syscall underneath differs — the next slide shows it.</p>
+    </div>
+  </div>
+  <div class="foot"><span class="muted"><span class="mono">strace -f -T</span>, 2M count arm.</span><span class="presswrap"><span class="press">press →</span></span></div>
+</section>
+
+<!-- ================= 21 · SYSCALLS PER EVENT ================= -->
+<section class="slide" data-art="content" data-notes="<p>Lead with gettid, because it is the one real per-event cost. BCC calls gettid 1,907,735 times, close to once per event. Python-BPF calls it 3 times, at startup only.</p><p>BUT BE CAREFUL WITH THE WORDING, and this is a correction made 2026-10-18. &quot;BCC calls gettid&quot; reads as a BCC framework property. It is not that, and it is not a strace artifact either. Say: BCC's per-event callback path costs a gettid per event, Python-BPF's does not. Where in that path the call comes from is not isolated.</p><p>What is established, each with its evidence.</p><p>1. It is per event, not an artifact of running under strace. gettid tracks N: 60 at N=100, 971 at N=1000, 1878 at N=2000, 1,907,735 at N=2M. A strace artifact would not scale 1:1 with the event count, and the ratio is the same at every size.</p><p>2. The pattern in steady state is poll, then gettid, then poll, strictly alternating, one gettid immediately after each poll that returned data. So the call sits in the callback dispatch, not in a timer.</p><p>3. It is NOT threading.get_ident(). Both programs contain the same per-event `if threading.get_ident() != main_ident` check, so blaming it was my first guess and it is wrong: 200,000 get_ident() calls in CPython 3.13 under strace -c produce 2 gettid calls. CPython caches the thread identity.</p><p>4. It is NOT import or load. `import bcc` plus `BPF(text=...)` under strace -c gives 0 gettid.</p><p>Still open: which call inside BCC's callback path issues it. The remaining candidate is the per-event event object construction, `b[&quot;events&quot;].event(data)`, which is BCC-specific ctypes work and runs once per event. Not proven. Do not assert it on stage; if asked, say the cause is in the callback path and not yet isolated.</p><p>One more thing worth knowing: the unprofiled pass cannot settle any of this. Its log is program stdout, not a syscall trace, so it contains no gettid line at all, present or absent. Only results/straceT carries syscalls.</p><p>Do not say Python-BPF polls once. That came from the wrong row of the rank file.</p><p>Both frameworks wait on the same three perf buffer fds with a 1 ms timeout, once per event; only the syscall name differs. The next slide proves that by tracing the fds.</p><p>The real eBPF syscalls are small and nearly equal: bpf 15 against 27, perf_event_open 4 against 4. Do not read the two million waits as eBPF activity.</p><p>Total calls: BCC 3,913,286 against Python-BPF 2,055,624, which is 1.96 against 1.03 calls per event. Python-BPF is lower even though it waits slightly more, because it does not pay a gettid per event.</p><p>Data: results/straceT, 2M count arm, strace -f -T unfiltered. Durations from this pass are not usable, because strace intercepts the syscall under study, so read counts only.</p>">
+  <div class="hdr"><span class="eyebrow">Part 3 · syscalls</span><span class="who">per event, 2M</span></div>
+  <div class="body">
+    <div class="rows">
+      <div class="nrow"><div class="nm">gettid</div><div class="v"><span class="bcc">1,907,735</span><br><span class="pbpf" style="font-size:24px">vs 3</span></div><div class="say rv">BCC's callback path pays one per event.</div></div>
+      <div class="nrow"><div class="nm">perf buffer wait<small>same 3 fds, same 1 ms timeout</small></div><div class="v" style="font-size:20px"><span class="bcc">poll</span> 1,978,114<br><span class="pbpf">epoll_wait</span> 2,037,562</div><div class="say rv">The wait is <b>not</b> eBPF work.</div></div>
+      <div class="nrow"><div class="nm">bpf + perf_event_open</div><div class="v" style="font-size:24px">19 <span class="muted" style="font-size:18px">vs</span> 31</div><div class="say">The real eBPF syscalls — nearly equal.</div></div>
+    </div>
+    <p class="lead rv"><b>1.96</b> syscalls per event for BCC · <b>1.03</b> for Python-BPF.</p>
+  </div>
+  <div class="foot"><span class="muted"><span class="mono">strace -f -T</span>, counts only — under strace durations are not usable.</span><span class="presswrap"><span class="press">press →</span></span></div>
+</section>
+
+<!-- ================= 22 · SAME TIMER ================= -->
+<section class="slide" data-art="content" data-notes="<p>The split matters, and it corrects what I said earlier. I claimed the loop wakes on its timer. Wrong: 95 percent of wakes carry data.</p><p>poll, BCC: 1,876,744 calls with data at 0.622 ms, 101,370 timeouts at 1.375 ms. Total 1292.6 s.<br>epoll_wait, Python-BPF: 1,927,731 with data at 0.675 ms, 109,831 timeouts at 1.373 ms. Total 1451.8 s.</p><p>The timeout means match to three digits, 1.375 against 1.373 ms, which is the strongest evidence that both sit on the same 1 ms timer. The trigger bursts and then goes quiet, so about 5 percent of wakes hit the empty timer and the rest return with data immediately.</p><p>1) Is there a time per syscall. Yes, strace -T recorded it. poll is 1305.694 s over 1,978,114 calls, 0.660 ms each. epoll_wait is 1451.765 s over 2,037,562 calls, 0.713 ms each. Both land on the 1 ms timeout, because both return 0 (Timeout). So the wait cost is the polling interval, not the framework.</p><p>2) What happens after poll or epoll_wait. Nothing framework-specific. Both are blocking waits in the userspace process; the kernel wakes the task when the timeout expires or a perf buffer has data. On wake the callback runs, then the loop waits again. The difference is below the API, not above it.</p><p>3) Why epoll_wait for Python-BPF and poll for BCC. The loader, not the language. Python-BPF goes through pylibbpf, which binds libbpf, and libbpf perf_buffer__poll registers the perf fds into an epoll set and calls epoll_wait. BCC does not use libbpf for this: it has its own loader (libbcc) and its own wait, a plain poll over the fd array. Same three fds, same 1 ms timeout, two implementations. Source: pylibbpf src/maps/perf_event_array.cpp calls perf_buffer__poll; BCC src/cc/api/BPFTable.cc:510 calls epoll_wait.</p><p>4) What connects libbpf, llvmlite and llc. Three stages, do not blur them. llvmlite builds IR from the decorated Python function; llc compiles that IR to a BPF object; libbpf then loads the object into the kernel and owns maps and the perf buffer at runtime. llvmlite and llc are build time and make the artifact; libbpf is runtime and consumes it. BCC has neither of the first two, since it compiles C at runtime, and its own loader replaces the third.</p><p>5) What happens after perf_buffer__poll returns. libbpf src/libbpf.c:11937. perf_buffer__poll is a thin wrapper: epoll_wait, then for each ready fd call perf_buffer__process_records, which walks the ring and hands each record to the callback we registered. No framework magic. BCC has the same shape with its own poll.</p><p>6) Does epoll beat a plain poll HERE. No, and say it plainly rather than implying otherwise. Per call: 0.622 against 0.675 ms with data, 1.375 against 1.373 ms on timeout. That 0.05 ms gap is noise, and the timeout figure is identical. The 2.9 percent difference in TOTAL (1292.6 against 1451.8 s) is not the syscall being slower, it is 3 percent more calls: 2,037,562 against 1,978,114. And the call count is wall time divided by the timeout, so Python-BPF simply ran 5 s longer, 1768.6 against 1763.6 s wall. Same trigger, same rate.</p><p>So where is the benefit. Only as the fd count grows. A plain poll passes the whole fd array every call and the kernel scans all N on return, so cost is O(N) per wait. epoll registers once through epoll_ctl, the kernel keeps the set, and epoll_wait returns only the ready entries, so cost is O(ready). At three perf fds that is the same work, which is exactly why the two means match. At hundreds of fds it is the difference between scanning hundreds and scanning the two that are ready. libbpf is a general loader and may watch many buffers, so it uses epoll for that reason, not for speed here.</p><p>Also note libbpf keeps both mechanisms in the same process: an epoll instance for the perf buffers, and a plain poll elsewhere. BCC contains an unused epoll_create1 it never registers anything with.</p><p>7) When there is no data, is the task idle. Yes, and say it precisely, because it explains the numbers above. The timeout is 1 ms and the call BLOCKS for it: the task sleeps and is woken by the timer or by data. The log proves it. Poll loop CPU is 103.638 s against 1768.550 s wall, about 6 percent. So 94 percent of the run is a sleeping task, not a spinning one. A 1 ms timeout is a scheduling interval, not a busy-wait, which is why two million waits cost 0.66 to 0.71 ms each instead of burning a core.</p><p>Still true: none of this is eBPF syscall work. bpf is 15 against 27, perf_event_open 4 against 4. The fds are the proof that both waits are the perf buffer.</p><p>Data: results/straceT, 2M count arm, strace -f -T unfiltered.</p><p>8) Why is epoll_wait's MEAN higher if epoll is supposed to be more effective. It is not slower, and epoll is not losing. Separate the two numbers that look like speed.</p><p>The timeout means are identical: 1.375 ms against 1.373 ms. That is the cleanest evidence available, because it is the syscall waiting the same 1 ms timer with nothing ready. At the syscall level the two cost the same.</p><p>The whole 2.9 percent TOTAL gap is call count: 2,037,562 against 1,978,114. Call count is wall divided by interval, and this arm ran 5 s longer (1768.6 against 1763.6), so it simply made more calls for the same 2M events.</p><p>The mean DATA case, 0.622 against 0.675 ms, is different for a second reason, and it is what each call FINDS rather than what the syscall costs. BCC returns with more fds ready per call: 28,922 double-ready and 1,032 triple, against 7,868 and 139. Its average call does more work and it returns less often.</p><p>Why would BCC batch more. Look at what BCC does between waits. It calls gettid 1,907,735 times, once per event, where Python-BPF calls it 3 times at startup. All that extra syscall work means BCC arrives back at poll later, by which time more perf fds have filled. So the batching is a consequence of BCC being busier in-process, not of poll being better.</p><p>Read the 1-ready share to see this: 98.4 percent for BCC, 99.6 percent for Python-BPF. Python-BPF mostly returns with exactly one fd ready, which is the efficient case. It consumes events promptly and comes back.</p><p>Where epoll would actually show its benefit: not here, and the slide says so. With three fds the two are equivalent by construction, poll being O(N) per wait and epoll_wait O(ready), with N equal to 3. The benefit needs N large, hundreds of fds, where poll must copy and scan the whole array every call while epoll returns only the ready entries. libbpf uses epoll because it is a general-purpose loader that may watch many buffers, not because it wins at three.</p><p>Also note neither framework optimised this path. BCC built an epoll instance with epoll_create1 and never registered anything in it, then polled anyway.</p>">
+  <div class="hdr"><span class="eyebrow">Part 3 · the wait</span><span class="who">same timer, both frameworks</span></div>
+  <div class="body">
+    <div class="grid2">
+      <div class="card" style="border-top:5px solid var(--red)"><div class="tag">BCC · poll</div><p style="color:var(--fg);font-size:21px;margin-top:8px">1 ms timer → <b class="mono good">1.375 ms</b></p><p style="margin-top:4px">2,037,562 vs 1,978,114 calls</p></div>
+      <div class="card" style="border-top:5px solid var(--accent)"><div class="tag">Python-BPF · epoll_wait</div><p style="color:var(--fg);font-size:21px;margin-top:8px">1 ms timer → <b class="mono good">1.373 ms</b></p><p style="margin-top:4px">95% of wakes carry data, not timeouts</p></div>
+    </div>
+    <div class="callout rv"><b>Same timer to three digits.</b> The 2.9% total gap is 3% more calls — that arm ran 5 s longer.</div>
+    <p class="lead rv">epoll earns its keep when you watch <b>hundreds</b> of fds. At three, the work is the same.</p>
+  </div>
+  <div class="foot"><span class="muted">Means from <span class="mono">strace -T</span> · timeout 1.375 vs 1.373 ms · with data 0.622 vs 0.675 ms.</span><span class="presswrap"><span class="press">press →</span></span></div>
+</section>
+
+<!-- ================= 23 · WALL VS CPU ================= -->
+<section class="slide" data-art="content" data-notes="<p>Two findings on this slide. First the wall-versus-CPU gap. Second, one line that changed the result.</p><p>One line changed the result: Python-BPF flushed every print. Removing that cut its system time 39 percent. Total CPU fell 21 percent. Source: 10-08, a run outside the packaged tree; the six programs in results/ carry no flush=True and the dataset README records the removal for this reason.</p><p>Data: results/unprofiled, 2M count arm, [TIMING]. Wall is 1763.6 s for BCC and 1768.6 s for Python-BPF, a 5 s gap, 0.3 percent. CPU is 134.6 s against 103.7 s, a 30.9 s gap, 30 percent. The trigger is a sequential fork and wait loop, about 0.7 ms per event, so it runs for about 24 minutes and both frameworks sit behind it. Wall therefore measures the trigger, not the framework.</p>">
+  <div class="hdr"><span class="eyebrow">Part 3 · method</span><span class="who">wall vs CPU</span></div>
+  <div class="body">
+    <div class="rows">
+      <div class="nrow"><div class="nm">wall</div><div class="v" style="font-size:23px">1763.6 s <span class="muted" style="font-size:17px">vs</span> 1768.6 s</div><div class="say">5 s — 0.3%</div></div>
+      <div class="nrow"><div class="nm">CPU</div><div class="v" style="font-size:23px">134.6 s <span class="muted" style="font-size:17px">vs</span> 103.7 s</div><div class="say"><b>30.9 s — 30%</b></div></div>
+    </div>
+    <p class="callout rv">The trigger sets the pace, not the framework — so every number in this deck is CPU.</p>
+  </div>
+  <div class="foot"><span class="muted">2M count arm · <span class="mono">results/unprofiled</span>, <span class="mono">[TIMING]</span>.</span><span class="presswrap"><span class="press">press →</span></span></div>
+</section>
+
+<!-- ================= 24 · THREE TERMS, ONE NESTED ================= -->
+<section class="slide" data-art="content" data-notes="<p>Before any result, account for the measurement. Every term on the slide is from experiment/scripts/rebenc_unprof.sh, the arm function.</p><p>Read the formula left to right, in the order the runner executes it.</p><p>pre is the bash sleep after the program is launched, 2 s for BCC and 1 s for Python-BPF. Fixed by us, not measured.</p><p>Then the GATE: the runner does not fire on the fixed sleep alone. It polls the log for the program to report it is polling, sleeping 0.5 s per attempt, up to 120 attempts. That is why 0.5 appears as its own term, and why the real wait can be longer than pre if a program is slow to attach. The gate exists because a fixed pre-sleep can expire before attach under strace or perf, and the trigger's whole burst is then lost with no [LOST] line to warn you.</p><p>t_init is the framework's own startup, 0.45 s for BCC against 0.02 s for Python-PBF. That is the one number on this slide the frameworks control at start.</p><p>t_trigger is the trigger program, sudo -u TRIG_USER running the binary with N events. At 2M it is about 1400 seconds.</p><p>Do not ADD t_trigger to t_poll. They overlap, and the code says so plainly. The arm function backgrounds the program and then runs the trigger in the foreground:</p><p>  &quot;$py&quot; &quot;$prog&quot; > &quot;$log&quot; 2>&1 &     the program starts, its poll loop begins<br>  sleep &quot;$pre&quot;<br>  sudo -u &quot;$TRIG_USER&quot; &quot;$TRIG_BIN&quot; &quot;$N&quot;    the trigger runs on the same clock<br>  sleep &quot;$T&quot;                                drain, poll still running<br>  kill -INT &quot;$pid&quot;                          poll ends here</p><p>So the trigger runs WHILE the poll loop is already waiting, and every event the trigger causes is what poll is draining. The poll loop contains the trigger.</p><p>The numbers agree. BCC poll loop wall is 1763.010 s and Total wall is 1763.592 s, so the poll loop is 99.97 percent of the whole run; init and setup take 0.581 s between them. If t_trigger were a separate term at about 1400 s the sum would be roughly 3170 s, nearly double the 1763.6 s actually observed. That is the arithmetic proof that the terms are nested, not stacked.</p><p>What this means for the argument. wall is set by the trigger, and the poll loop is the program sitting behind it, so a wall difference between frameworks is a difference in how long each one waits, not in how much work it does. That is exactly why the deck quotes CPU.</p><p>Then teardown: SIGINT, then the runner waits in 0.5 s steps up to 20 s for the child to exit.</p><p>The point is that only two terms differ between the frameworks, t_init and t_poll, and both are inside the program. Every other term is identical by construction. So if wall differs between arms, it is not the harness.</p><p>Every number in this deck is CPU time, not wall time, because the trigger sets the pace.</p>">
+  <div class="hdr"><span class="eyebrow">Part 3 · method</span><span class="who">three terms, one nested</span></div>
+  <div class="body">
+    <div class="fig">
+      <div class="seg" id="seg-harness"><div class="h">pre + gate</div><div class="n">2 s / 1 s + 0.5 s</div><div class="d">bash, before launch. The gate fires only once the program reports it is polling.</div></div>
+      <div class="seg big" id="seg-init"><div class="h">t_init</div><div class="n">0.45 s / 0.02 s</div><div class="d"><b>The term that separates them</b> — 0.45 s against 0.02 s, the only part the framework controls.</div></div>
+      <div class="seg" id="seg-poll"><div class="h">t_poll</div><div class="n">1763.6 / 1768.6 s</div><div class="d" id="ttrig">The loop. It <b>contains</b> the trigger — and it is nearly the same in both.</div></div>
+    </div>
+    <p class="lead rv" id="nested-note">The trigger (~1400 s) runs <b>inside</b> the poll loop — not beside it.</p>
+  </div>
+  <div class="foot"><span class="muted"><span class="mono">experiment/scripts/rebenc_unprof.sh</span>, the arm function.</span><span class="presswrap"><span class="press">press →</span></span></div>
+</section>
+
+<!-- ================= 24b · HOW WE RUN ONE ARM (code stage) ================= -->
+<section class="slide" data-art="content" data-single data-notes="<p>Live. The runner: one arm at a time. It starts the program, sleeps a pre-wait for safety, then waits until the program reports that it is polling before it fires the trigger. That gate matters - a fixed pre-sleep can expire before attach and lose the trigger's whole burst with no LOST line. After the trigger it drains for T, then sends SIGINT and waits for the program to exit. The two arm calls at the end pass 2 s for BCC and 1 s for Python-BPF. This slide needs slidev dev; a static build shows a placeholder here.</p>">
+  <div class="hdr"><span class="eyebrow">Part 3 · method in code</span><span class="who">one arm at a time</span></div>
+  <div class="body">
+    <div class="cs" tabindex="0">
+      <div class="cs-body"><div class="cs-pane" data-lang="sh" data-src="src-run" data-from="48" data-to="68" data-name="experiment/scripts/rebenc_unprof.sh"></div></div>
+      <div class="cs-foot"><span>↑ ↓ move · click to pin · scroll for the rest of the file</span><span class="pos" data-pos></span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 25 · DIVIDER 04 ================= -->
+<section class="slide section" data-sec="4" data-art="section" data-notes="<p class='say'>Part four — what you lose. Four limits, all found by building a real tool.</p>">
+  <p class="num">04</p>
+  <h2>What do you lose?</h2>
+  <p class="sub">Four limits in Python-BPF today, all found by building a real tool.</p>
+</section>
+
+<!-- ================= 26 · LIMIT 1 ENFORCEMENT ================= -->
+<section class="slide" data-art="content" data-notes="<p>This slide now rests on two runs, not on a helper list. Both are in evidence.txt: the Python-BPF enforcer as section 3, the BCC one as section 5.</p><p>Python-BPF path: the kernel program prints, trace_pipe carries the line to userspace, and the process calls os.kill. Three steps, and the kill is a userspace action.</p><p>BCC path: bpf_send_signal raises the signal from inside the program. Measured today on vmnono with BCC 0.36.0: the trigger came back rc = -9, SIGKILL, with no userspace kill loop at all. Same probe point, kprobe/do_futex, same op set tagged 1/2/3.</p><p>The honest boundary, and say this before someone asks. Neither library DENIES a syscall. bpf_send_signal delivers on return from the probe, so do_futex has already run. The ordering limit is identical to the Python-BPF version; what BCC removes is the round-trip, not the ordering. A seccomp filter runs before the call, which is why it can deny where neither can.</p><p>Do not overclaim it as enforcement. It is a faster kill, not a block. The count is the honest measure of the gap: 18 helpers against 36.</p><p>Sources: evidence.txt sections 3 and 5; bcc/src/cc/export/helpers.h; pythonbpf/helper/.</p>">
+  <div class="hdr"><span class="eyebrow">Part 4 · limit 1</span><span class="who">enforcement</span></div>
+  <div class="body">
+    <table style="font-size:20px">
+      <tr><th></th><th class="pbpf" style="text-transform:none;letter-spacing:0;font-size:17px">Python-BPF</th><th class="bcc" style="text-transform:none;letter-spacing:0;font-size:17px">BCC</th></tr>
+      <tr><td>raise the signal</td><td>user space, after <span class="mono">trace_pipe</span></td><td><span class="mono">bpf_send_signal</span>, in kernel</td></tr>
+      <tr><td>helpers available</td><td class="mono">18</td><td class="mono">36</td></tr>
+      <tr><td><span class="mono">bpf_send_signal</span></td><td class="warn">absent</td><td class="good">present</td></tr>
+    </table>
+    <p class="lead rv"><b>Both kill the trigger.</b> BCC needs no user space hop — trigger returns <span class="mono">rc = -9</span>.</p>
+    <p class="callout rv">But <b>neither denies</b> a syscall: the signal fires on arrival back from the probe. A seccomp filter runs before the call.</p>
+  </div>
+  <div class="foot"><span class="muted">Measured on vmnono, BCC 0.36.0 · helper counts from <span class="mono">pythonbpf/helper/</span>.</span><span class="presswrap"><span class="press">press →</span></span></div>
+</section>
+
+<!-- ================= 27a · THE ENFORCER (code stage) ================= -->
+<section class="slide" data-art="content" data-single data-notes="<p>Live. Open the BCC enforcer, then put ghostlock_enforce.py beside it to show the contrast.</p><p>What the file does: watches kprobe/do_futex, tags the op set, and on tag 3 calls bpf_send_signal(SIGKILL). That is the helper Python-BPF does not have.</p><p>The tags, because the log will not explain them. They are the GhostLock exploit sequence: tag 1 is FUTEX_LOCK_PI, the chain gets built; tag 2 is FUTEX_WAIT_REQUEUE_PI, the victim parks; tag 3 is FUTEX_CMP_REQUEUE_PI, the requeue that converts the victim's lock, which is the trigger. Tag 0 is everything else and is filtered out, so UNLOCK_PI never appears. Only tag 3 signals, and tags 1 and 2 share one pid: a single process walking the attack.</p><p>Measured on vmnono, BCC 0.36.0: the trigger comes back rc = -9, SIGKILL, raised inside the program. No trace_pipe read, no userspace kill loop. The Python-BPF enforcer needs both, because it has no such helper.</p><p>Say signalling, not killed. The kill leaves no line of its own: the task is gone before anything could print after it, so the program announces the decision before signalling and the exit status is the proof. The Python-BPF side can log ENFORCER KILLED after the fact, because userspace performs the kill there.</p><p>Still a kill, not a deny. bpf_send_signal delivers on return from the probe, so do_futex has already run. A seccomp filter runs before the call, which is why it can deny where neither library can.</p><p>Two build notes if asked: BCC cannot include linux/futex.h here (clang cannot emit mutex_init for BPF), and it cannot take a typed kprobe argument on this kernel, because BCC rewrites it to ctx->di and pt_regs is only forward-declared. The file carries a local pt_regs_x64 layout instead. Evidence section 5.</p><p>The ordering point still stands for both. Neither denies.</p>">
+  <div class="hdr"><span class="eyebrow">Part 4 · limit 1 in code</span><span class="who">the helper Python-BPF does not have</span></div>
+  <div class="body">
+    <div class="cs" tabindex="0">
+      <div class="cs-body split">
+        <div class="cs-pane" data-lang="c" data-src="src-enf" data-from="51" data-to="74" data-name="BCC · signal raised in the kernel program"></div>
+        <div class="cs-pane" data-lang="py" data-src="src-enfpb" data-from="68" data-to="91" data-name="Python-BPF · print, read trace_pipe, os.kill"></div>
+      </div>
+      <div class="cs-foot"><span>↑ ↓ move · click to pin · scroll for the rest of the file</span><span class="pos" data-pos></span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 27 · LIMIT 2 SECTIONS ================= -->
+<section class="slide" data-art="content" data-notes="<p>The cause, in one sentence: struct_pt_regs contains union members, and two sections that share it create circular debug metadata, so the compiler recurses.</p><p>Click 1: the failure and the workaround. RecursionError raised in function_debug_info.py line 73. The workaround is one section per file, which is why every GhostLock program holds a single section.</p><p>Source: &quot;Python-BPF All Workarounds for struct_pt_regs with Multiple Sections&quot;, 2026-05-18, Python-BPF alpha. That note lists five workarounds and recommends one section per file for immediate use, and a union check in function_debug_info.py as the proper fix.</p><p>One caution. The note records a compile-time RecursionError. Disksnoop, which is two sections on the same struct, was later observed to load and attach and print wrong values instead. That is a second, quieter failure of the same shape. Do not claim the limit is gone: writing IR is not running correctly. If asked which form you will see, say the compile-time crash is the documented one and the silent wrong-value run is the one we hit on 0.2.0.</p>">
+  <div class="hdr"><span class="eyebrow">Part 4 · limit 2</span><span class="who">one register struct, two sections</span></div>
+  <div class="body">
+    <p class="lead"><span class="mono">struct_pt_regs</span> contains <b>union</b> members. Two sections that share it break the debug metadata.</p>
+    <table style="font-size:21px">
+      <tr><th>sections with <span class="mono">struct_pt_regs</span></th><th>result</th></tr>
+      <tr><td>one</td><td class="good">compiles</td></tr>
+      <tr><td>two</td><td class="warn">debug metadata recurses</td></tr>
+    </table>
+    <p class="lead rv"><span class="mono">RecursionError</span> in <span class="mono">function_debug_info.py:73</span></p>
+    <p class="callout rv">Workaround: <b>one section per file</b> — <span class="mono">kprobe</span> and <span class="mono">kretprobe</span> cannot share a file.</p>
+  </div>
+  <div class="foot"><span class="muted">Source: struct_pt_regs workarounds note, 2026-05-18 · Python-BPF alpha.</span><span class="presswrap"><span class="press">press →</span></span></div>
+</section>
+
+<!-- ================= 28 · LIMIT 3 KERNEL STRING ================= -->
+<section class="slide" data-art="content" data-notes="<p>Ask the room: what does ctx.si hold here? A struct filename pointer, the second argument register.</p><p>The table is the three documented attempts, each with its real error. First row: cast to the vmlinux struct type and read its name field, probe_read reports Struct type not found, because vmlinux ctypes stubs are not registered in the compiler's struct symbol table. Second row: allocate a local @struct with a str(256) field and read into it, ValueError Variable 'buf' not found, because the struct constructor never registers the variable in the local symbol table. Third row: a c_uint64 buffer, which compiles and reads only 8 bytes, so a filename truncates.</p><p>Click 1: the only thing that works. probe_read with an 8 byte destination returns the struct's name pointer, 0xffff8f2d4705c000, which is a valid kernel address in the 0xffff8 range. So the helper works and the read succeeds.</p><p>Click 2: the correction, and the reason this slide used to be wrong. The title of the source note says &quot;returns garbage&quot;, and the note itself says that title is wrong. The value is a valid pointer. What is missing is the second dereference: probe_read leaves a loaded i64, and probe_read_str wants an i8* pointer, so the emitter would need to insert inttoptr. It does not, and that is the gap.</p><p>Source: &quot;Python-BPF Probe Read of ctx.si Returns Garbage&quot;, 2026-07-25, measured on Python-BPF 0.1.9. BCC does this in one C expression: (struct filename *)PT_REGS_PARM2(ctx) then fname->name, because clang emits the offset dereference for you.</p>">
+  <div class="hdr"><span class="eyebrow">Part 4 · limit 3</span><span class="who">reading a kernel string</span></div>
+  <div class="body">
+    <p class="lead"><span class="mono">ctx.si</span> holds a <span class="mono">struct filename *</span>. Three attempts to read its name:</p>
+    <table style="font-size:19px">
+      <tr><th>attempt</th><th>helper</th><th>result</th></tr>
+      <tr><td>read <span class="mono">struct filename.name</span></td><td class="mono">probe_read</td><td class="warn">Struct type … not found</td></tr>
+      <tr><td>read into local <span class="mono">str(256)</span></td><td class="mono">probe_read_str</td><td class="warn">Variable 'buf' not found</td></tr>
+      <tr><td>read into <span class="mono">c_uint64</span></td><td class="mono">probe_read_str</td><td class="warn">8 bytes — truncates</td></tr>
+    </table>
+    <p class="lead rv">What works reads the <b>pointer, not the string</b>: <span class="mono">0xffff8f2d4705c000</span> — a valid kernel address.</p>
+    <p class="callout rv">Not garbage: the <b>second dereference</b> is missing. <span class="mono">probe_read</span> gives an <span class="mono">i64</span>; <span class="mono">probe_read_str</span> wants an <span class="mono">i8*</span>. No <span class="mono">inttoptr</span>.</p>
+  </div>
+  <div class="foot"><span class="muted">Measured on Python-BPF 0.1.9 · note of 2026-07-25.</span><span class="presswrap"><span class="press">press →</span></span></div>
+</section>
+
+<!-- ================= 29 · LIMIT 4 CODEGEN ================= -->
+<section class="slide" data-art="content" data-single data-notes="<p>Source: 2026-05-11, last audited 2026-05-10, spoken here as a live limit. An array subscript falls to a bare return at expr_pass.py line 730, so no code is emitted for ctx.args[0]. The addition operator maps to a plain builder add at line 227, so count plus one compiles to load, add, store, with a race window between load and store. BCC emits a single atomicrmw with sequential consistency for the same line. So on many CPUs a Python-BPF map counter can lose updates. Both are compiler gaps, not design limits.</p>">
+  <div class="hdr"><span class="eyebrow">Part 4 · limit 4</span><span class="who">quiet codegen gaps</span></div>
+  <div class="body">
+    <table style="font-size:22px">
+      <tr><th>construct</th><th>what happens</th></tr>
+      <tr><td class="mono">ctx.args[0]</td><td class="warn">falls through — no code emitted</td></tr>
+      <tr><td class="mono">count += 1</td><td class="warn">a plain add, not atomic</td></tr>
+    </table>
+    <p class="lead">A map counter <b>can lose updates</b> — BCC emits one atomic read-modify-write for the same line. That is the <span class="mono">Count.update(...)</span> line from the program you saw in the setup.</p>
+    <p class="sub">Both are compiler gaps, not design limits.</p>
+  </div>
+  <div class="foot"><span class="muted"><span class="mono">expr_pass.py:730</span> (subscript) · <span class="mono">expr_pass.py:227</span> (add).</span></div>
+</section>
+
+<!-- ================= 30 · ASK: THE KERNEL OR THE FRAMEWORK ================= -->
+<section class="slide" data-art="content" data-notes="<p>Ask the room before advancing: a print with four values goes silent. Is that Python-BPF, or the kernel? Pause.</p><p>Click 1: reveal. It is the kernel, and both frameworks are subject to it. bpf_trace_printk takes three values after the format string, and the rule comes from the helper signature: fmt plus fmt_size plus three varargs is five, the eBPF helper argument cap. A framework that tried to print four would fail the verifier, so no framework lifts this. Source: the 2026-10-14 note &quot;BCC vs pythonbpf bpf_trace_printk maximum payload&quot;, and linux/bpf.h, which states the helper &quot;can take up to three additional u64 arguments (as an eBPF helpers, the total number of arguments is limited to five).&quot;</p><p>Click 2: the part that belongs in a talk about Python-BPF. The count is not the finding, the silence is. BCC fails at load with the BPF stack-limit error and the compiler names the fix. Python-BPF loads, attaches, drops the line, and says nothing at all. That is the difference worth saying out loud.</p><p>An earlier reading of this slide said a program with eight context fields, or five separate print statements, goes silent. That is evidence.txt section 4, measured while building the GhostLock tracker, and it does not separate two causes. The measured kernel rule is the four-value case, so state that and not the other.</p>">
+  <div class="hdr"><span class="eyebrow">Ask the room</span><span class="who">the silent case</span></div>
+  <div class="body ask">
+    <p class="q">One <span class="mono">print</span>, four values → <b>silent</b>.<br>Is that Python-BPF, or the kernel?</p>
+    <p class="pause">ask · pause · then press →</p>
+    <div class="rv" style="display:flex;flex-direction:column;align-items:center;gap:12px">
+      <p class="verdict"><span class="good">The kernel.</span> Both frameworks. <span class="mono" style="font-size:23px">bpf_trace_printk</span> takes three values after the format string.</p>
+      <p class="sub">fmt + size + 3 varargs = 5, the eBPF helper argument cap. A framework that tried four would fail the verifier.</p>
+      <p class="lead rv">The count is not the finding. <b class="warn">The silence is.</b></p>
+    </div>
+  </div>
+  <div class="foot"><span class="muted">Notes of 2026-10-14 · <span class="mono">linux/bpf.h</span>.</span><span class="presswrap"><span class="press">press →</span></span></div>
+</section>
+
+<!-- ================= 32 · VERDICT TABLE ================= -->
+<section class="slide" data-art="content" data-notes="<p>Data: results/unprofiled and results/straceT, 2M count arm. Startup CPU is 0.45 s against 0.02 s, because BCC forks clang and reads kernel headers at run time. Per-event CPU is 134.6 s against 103.7 s. Syscalls per event: BCC 3,913,286 over 2M events is 1.96; Python-BPF 2,055,624 over 2M is 1.03. Peak RSS is 175 MB against 22 MB, because clang is loaded in the BCC process while Python-BPF forks one child that exits.</p>">
+  <div class="hdr"><span class="eyebrow">Result</span><span class="who">2M events, count variant</span></div>
+  <div class="body">
+    <table style="font-size:20px">
+      <tr><th>axis</th><th class="bcc" style="text-transform:none;letter-spacing:0">BCC</th><th class="pbpf" style="text-transform:none;letter-spacing:0">Python-BPF</th><th>why</th></tr>
+      <tr><td>startup CPU</td><td class="mono">0.45 s</td><td class="mono good">0.02 s</td><td class="muted">BCC compiles C at runtime</td></tr>
+      <tr><td>per-event CPU</td><td class="mono">134.6 s</td><td class="mono good">103.7 s</td><td class="muted">ctypes bridge vs pybind11 bridge</td></tr>
+      <tr><td>syscalls per event</td><td class="mono">1.96</td><td class="mono good">1.03</td><td class="muted">one gettid per event in BCC</td></tr>
+      <tr><td>peak RSS</td><td class="mono">175 MB</td><td class="mono good">22 MB</td><td class="muted">clang loaded in the BCC process</td></tr>
+    </table>
+    <p class="lead rv"><b>Python-BPF wins all four axes.</b> BCC wins one thing today — next slide.</p>
+  </div>
+  <div class="foot"><span class="muted">Python-BPF RSS is the parent process; its llc child peaks at 85 MB, separately.</span><span class="presswrap"><span class="press">press →</span></span></div>
+</section>
+
+<!-- ================= 33 · WHAT TO CHOOSE ================= -->
+<section class="slide" data-art="content" data-single data-notes="<p>The choice, from the October numbers only. Python-BPF wins startup, per-event CPU, syscalls per event and memory. BCC wins one thing today: a struct as a map value compiles in BCC and fails in Python-BPF.</p><p>Then the boundary, and be precise. It is not that BCC denies and Python-BPF cannot: neither denies. BCC has bpf_send_signal, so enforcement can be raised from the kernel program instead of a userspace loop after a trace_pipe read. A hop removed, not a verdict. A seccomp filter runs before the syscall, which is why it can deny where neither library can.</p><p>End on the question, then stop talking and let the room answer. That is the handover to Q&A, and the best answers come from people running these frameworks on workloads we have not tried.</p>">
+  <div class="hdr"><span class="eyebrow">Result</span><span class="who">pick by job, not by speed</span></div>
+  <div class="body">
+    <div class="grid2">
+      <div class="card" style="border-top:5px solid var(--accent)"><div class="tag" style="color:var(--accent);border-color:var(--accent)">Pick Python-BPF</div>
+        <p style="color:var(--fg);font-size:19px;margin-top:10px;line-height:1.55">startup <b class="mono">0.02 s</b><br>CPU at 2M <b class="mono">1.30× lower</b><br>syscalls <b class="mono">1.03 / event</b><br>memory <b class="mono">22 MB</b></p></div>
+      <div class="card" style="border-top:5px solid var(--red)"><div class="tag" style="color:var(--red);border-color:var(--red)">Pick BCC</div>
+        <p style="color:var(--fg);font-size:19px;margin-top:10px;line-height:1.55">a struct as a map value <b>works today</b><br><span class="muted">plus the in-kernel signal path</span></p></div>
+    </div>
+    <p class="callout">Boundary: <b>neither</b> can deny a syscall in the kernel. A seccomp filter acts before the call.</p>
+  </div>
+  <div class="foot"><span class="muted">October numbers only · both frameworks run the same program.</span></div>
+</section>
+
+<!-- ================= 34 · THE ROUTE BACK ================= -->
+<section class="slide" data-art="content" data-single data-notes="<p class='say'>Four questions, four answers. Startup: the work moved earlier. Per event: one bridge is cheaper. The wait: same timer, so it is not the story. And what you lose: enforcement is the one that decides a project.</p><p>If you remember one line: <b>the kernel is the same; the glue is the difference.</b> Everything we measured lives in the user space box we drew at the start.</p><p>Click any answer to jump back to its evidence.</p>">
+  <div class="hdr"><span class="eyebrow">Close</span><span class="who">the four answers</span></div>
+  <div class="body">
+    <div class="route">
+      <div class="rt" data-go="1"><span class="n">01</span><span class="t">Starts faster?<small>Python-BPF · 0.02 s vs 0.45 s</small></span><span class="r">the work moved earlier</span></div>
+      <div class="rt" data-go="2"><span class="n">02</span><span class="t">Less CPU per event?<small>Python-BPF · 103.7 s vs 134.6 s at 2M</small></span><span class="r">one bridge is cheaper</span></div>
+      <div class="rt" data-go="3"><span class="n">03</span><span class="t">Who waits?<small>both — same 1 ms timer, same fds</small></span><span class="r">not the story</span></div>
+      <div class="rt now" data-go="4"><span class="n">04</span><span class="t">What do you lose?<small>deny · sections · kernel strings · atomics</small></span><span class="r">this decides it</span></div>
+    </div>
+    <p class="lead" style="text-align:center">The kernel is the same. <b>The glue is the difference.</b></p>
+  </div>
+  <div class="foot"><span class="muted">Click an answer to jump back to its section.</span></div>
+</section>
+
+<!-- ================= 35 · Q&A ================= -->
+<section class="slide center" data-art="content" data-notes="<p>Thank you. Ten to fifteen minutes for questions. The dataset is in the talk repository: results/unprofiled, results/straceT and results/perfrecord, with a README that records how to read each pass. Happy to take questions on the methodology, the limitations, or the harness.</p>">
+  <p class="overline">PyCon HK 2026</p>
+  <h1 style="font-size:76px;margin:8px 0 16px">Q&amp;A</h1>
+  <p class="lead" style="max-width:960px">Slides and data → <b>github.com/nizarakbarm/pycon-hk-2026-bcc-vs-pythonbpf</b></p>
+  <p class="sub" style="margin-top:14px">Python-BPF <a href="https://github.com/python-bpf/python-bpf">github.com/python-bpf/python-bpf</a> &nbsp;·&nbsp; BCC <a href="https://github.com/iovisor/bcc">github.com/iovisor/bcc</a></p>
+</section>
+
+<div class="spine"></div>
+<div class="counter"></div>
+<div class="osc" aria-hidden="true">
+  <button data-osc="prev" title="Previous slide">Previous slide</button>
+  <span data-osc="page">Page 1 of 1</span>
+  <button data-osc="next" title="Next slide">Next slide</button>
+  <button data-osc="fullscreen" title="Toggle fullscreen (f)">Toggle fullscreen</button>
+  <button data-osc="overview" title="Toggle overview view (o)">Toggle overview view</button>
+  <button data-osc="presenter" title="Open presenter view (p)">Open presenter view</button>
+</div>
+
+<div class="overview" aria-hidden="true"><div class="ov-grid" id="ov-grid"></div></div>
+</div><!-- /stage -->
+<div id="notes-panel">
+  <div class="nhead"><b id="notes-num"></b><span class="hint">S close · → next step · ← back one step</span></div>
+  <div id="notes-text"></div>
+</div>
+
+<script type="text/plain" id="src-bcc">import threading
+import time
+import resource
+import signal
+from bcc import BPF
+
+main_ident = threading.get_ident()
+main_native = threading.get_native_id()
+interrupted = False
+
+def handler(signum, frame):
+    global interrupted
+    interrupted = True
+
+signal.signal(signal.SIGINT, handler)
+
+program="""
+BPF_HASH(count_hash, u32, u64);
+
+struct data_t {
+    u32 uid;
+    u64 count;
+    char comm[16];
+};
+
+BPF_PERF_OUTPUT(events);
+
+TRACEPOINT_PROBE(syscalls, sys_enter_execve) {
+    u32 uid = bpf_get_current_uid_gid();
+    struct data_t data = {};
+    if (uid == 1000) {
+        bpf_get_current_comm(&data.comm, sizeof(data.comm));
+	    data.uid = uid;
+	    u64 *count, zero = 0;
+        count = count_hash.lookup(&uid);
+        if (count) {
+            (*count)++;
+	        data.count = *count;
+        } else {
+            count_hash.update(&uid, &zero);
+            data.count = 0;
+        }
+        events.perf_submit(args, &data, sizeof(data));
+    }
+    return 0;
+}
+"""
+
+def _rusage(tag):
+    r = resource.getrusage(resource.RUSAGE_SELF)
+    c = resource.getrusage(resource.RUSAGE_CHILDREN)
+    print(f"[RUSAGE] {tag} maxrss={r.ru_maxrss}KB minflt={r.ru_minflt} majflt={r.ru_majflt} "
+          f"inblock={r.ru_inblock} oublock={r.ru_oublock} nvcsw={r.ru_nvcsw} nivcsw={r.ru_nivcsw} "
+          f"utime={r.ru_utime:.3f}s stime={r.ru_stime:.3f}s "
+          f"| children utime={c.ru_utime:.3f}s stime={c.ru_stime:.3f}s maxrss={c.ru_maxrss}KB", flush=True)
+
+
+t0_cpu = time.process_time()
+t0_wall = time.perf_counter()
+
+b = BPF(text=program)
+
+t1_cpu = time.process_time()
+t1_wall = time.perf_counter()
+
+def print_event(cpu, data, size):
+    if threading.get_ident() != main_ident:
+        print(f"[THREAD] WARNING: callback on DIFFERENT thread! pid={threading.get_ident()} main={main_ident}", flush=True)
+    event = b["events"].event(data)
+    if event.uid == 1000:
+       print(f"CPU [{cpu}] UID {event.uid} comm: {event.comm.decode('utf-8', 'replace')}, count: {event.count}")
+
+b["events"].open_perf_buffer(
+            callback=print_event,
+            lost_cb=lambda cnt: print(f"[LOST] {cnt} events lost", flush=True)
+)
+
+t2_cpu = time.process_time()
+t2_wall = time.perf_counter()
+
+print(f"[THREAD] Main poll: ident={main_ident} native={main_native}", flush=True)
+print(f"[TIMING] BPF init CPU: {t1_cpu-t0_cpu:.3f}s  wall: {t1_wall-t0_wall:.3f}s", flush=True)  # rusage
+_rusage("init")
+print(f"[TIMING] Setup CPU: {t2_cpu-t1_cpu:.3f}s  wall: {t2_wall-t1_wall:.3f}s", flush=True)  # rusage
+_rusage("setup")
+
+print("Starting poll... (Ctrl+C to stop)", flush=True)
+
+try:
+    t3_cpu = time.process_time()
+    t3_wall = time.perf_counter()
+    while not interrupted:
+        b.perf_buffer_poll(1)
+except KeyboardInterrupt:
+    pass
+
+t4_cpu = time.process_time()
+t4_wall = time.perf_counter()
+
+print(f"[TIMING] Poll loop CPU: {t4_cpu-t3_cpu:.3f}s  wall: {t4_wall-t3_wall:.3f}s", flush=True)  # rusage
+_rusage("poll")
+print(f"[TIMING] Total CPU: {t4_cpu-t0_cpu:.3f}s  wall: {t4_wall-t0_wall:.3f}s", flush=True)
+print(f"[SUMMARY] Events in map: {sum(v.value+1 for v in b["count_hash"].values())}", flush=True)
+_rusage("after-summary")
+</script>
+<script type="text/plain" id="src-pbpf">import threading
+import resource, time, signal
+from pythonbpf import BPF, section, bpf, map, bpfglobal, struct
+from pythonbpf.maps import HashMap, PerfEventArray
+from pythonbpf.helper import uid, comm
+from ctypes import c_void_p, c_uint32, c_uint64, c_int64
+
+interrupted = False
+def handler(signum, frame):
+    global interrupted
+    interrupted = True
+signal.signal(signal.SIGINT, handler)
+
+@bpf
+@struct
+class data_t:
+    uid: c_uint64
+    count: c_uint64
+    last_comm: str(16)
+
+@bpf
+@map
+def Count() -> HashMap:
+    return HashMap(key=c_uint32, value=c_uint64, max_entries=1024)
+
+@bpf
+@map
+def events() -> PerfEventArray:
+    return PerfEventArray(key_size=c_int64, value_size=c_int64)
+
+@bpf
+@bpfglobal
+def LICENSE() -> str:
+    return "GPL"
+
+@bpf
+@section("tracepoint/syscalls/sys_enter_execve")
+def trace_execve(ctx: c_void_p) -> c_int64:
+    u_id = uid()
+    data = data_t()
+    if u_id == 1000:
+        comm(data.last_comm)
+        data.uid = u_id
+
+        count = Count.lookup(u_id)
+        if count:
+            Count.update(u_id, count + 1)
+            data.count = count + 1
+        else:
+            Count.update(u_id, 0)
+            data.count = 0
+
+        events.output(data)
+    return 0
+
+main_ident = threading.get_ident()
+main_native = threading.get_native_id()
+
+def _rusage(tag):
+    r = resource.getrusage(resource.RUSAGE_SELF)
+    c = resource.getrusage(resource.RUSAGE_CHILDREN)
+    print(f"[RUSAGE] {tag} maxrss={r.ru_maxrss}KB minflt={r.ru_minflt} majflt={r.ru_majflt} "
+          f"inblock={r.ru_inblock} oublock={r.ru_oublock} nvcsw={r.ru_nvcsw} nivcsw={r.ru_nivcsw} "
+          f"utime={r.ru_utime:.3f}s stime={r.ru_stime:.3f}s "
+          f"| children utime={c.ru_utime:.3f}s stime={c.ru_stime:.3f}s maxrss={c.ru_maxrss}KB", flush=True)
+
+
+t0_cpu = time.process_time()
+t0_wall = time.perf_counter()
+b = BPF()
+b.load()
+b.attach_all()
+t1_cpu = time.process_time()
+t1_wall = time.perf_counter()
+
+def printdata(cpu, event):
+    if threading.get_ident() != main_ident:
+        print(f"[THREAD] WARNING: callback on DIFFERENT thread! pid={threading.get_ident()} main={main_ident}", flush=True)
+    if event.uid == 1000:
+       print(f"CPU [{cpu}] UID {event.uid}, comm: {event.last_comm.decode()}, count: {event.count}")
+
+perf = b["events"].open_perf_buffer(
+       callback=printdata, 
+       struct_name="data_t",
+       lost_callback=lambda cpu, cnt: print(f"[LOST] {cnt} events on CPU {cpu}", flush=True)
+       )
+t2_cpu = time.process_time()
+t2_wall = time.perf_counter()
+
+print(f"[THREAD] Main poll: ident={main_ident} native={main_native}", flush=True)
+print(f"[TIMING] BPF init CPU: {t1_cpu-t0_cpu:.3f}s  wall: {t1_wall-t0_wall:.3f}s", flush=True)  # rusage
+_rusage("init")
+print(f"[TIMING] Setup CPU: {t2_cpu-t1_cpu:.3f}s  wall: {t2_wall-t1_wall:.3f}s", flush=True)  # rusage
+_rusage("setup")
+print("Starting to poll... (Ctrl+C to stop)", flush=True)
+
+try:
+   while not interrupted:
+     perf.poll(1)
+except KeyboardInterrupt:
+     pass
+t3_cpu = time.process_time()
+t3_wall = time.perf_counter()
+
+print(f"[TIMING] Poll loop CPU: {t3_cpu-t2_cpu:.3f}s  wall: {t3_wall-t2_wall:.3f}s", flush=True)  # rusage
+_rusage("poll")
+print(f"[TIMING] Total CPU: {t3_cpu-t0_cpu:.3f}s  wall: {t3_wall-t0_wall:.3f}s", flush=True)
+print(f"[SUMMARY] Events in map: {sum(v+1 for v in b['Count'].values())}", flush=True)
+_rusage("after-summary")
+</script>
+<script type="text/plain" id="src-run">#!/bin/bash
+# sys_enter_execve with_map, UN-PROFILED (no strace, no perf record).
+# Variant-agnostic: VAR = count | A | B  (canonical + both ablation variants).
+# Same mechanism as rebenc_abl2m.sh; output path passed in via OUT so the three
+# passes can land in separate trees.
+#
+# vmnono (nono1) only. Output NOT under /tmp.
+set -u
+TAG="${TAG:-$(date -u +%Y%m%dT%H%M%SZ)}"
+N="${N:-100}"
+VAR="${VAR:-count}"
+OUT="${OUT:-/root/experiment/results/unprofiled}"
+GAP="${GAP:-60}"
+T="${T:-0.5}"
+mkdir -p "$OUT"
+
+[ "$(hostname)" = nono1 ] || { echo "[HALT] vmnono/nono1 only"; exit 1; }
+
+case "$VAR" in
+  count) SUFFIX="map1_count" ;;
+  A)     SUFFIX="ablA_empty" ;;
+  B)     SUFFIX="ablB_print_const" ;;
+  *) echo "[HALT] VAR must be count|A|B"; exit 2 ;;
+esac
+
+PY_BCC=/usr/bin/python3
+PY_PB=/root/experiment/.venv/bin/python3
+case "$VAR" in
+  count) PB=/root/experiment/with_map/bcc/sys_enter_execve/map_1_perf_timed_count.py
+         PP=/root/experiment/with_map/pythonbpf/sys_enter_execve/map_1_perf_timed_count.py ;;
+  A)     PB=/root/experiment/with_map/bcc/sys_enter_execve/abl_A_empty_callback.py
+         PP=/root/experiment/with_map/pythonbpf/sys_enter_execve/abl_A_empty_callback.py ;;
+  B)     PB=/root/experiment/with_map/bcc/sys_enter_execve/abl_B_print_const.py
+         PP=/root/experiment/with_map/pythonbpf/sys_enter_execve/abl_B_print_const.py ;;
+esac
+TRIG_USER=operator
+TRIG_BIN=/usr/local/bin/gen_exec
+
+for p in "$PB" "$PP"; do
+  [ -f "$p" ] || { echo "[HALT] missing: $p"; exit 3; }
+done
+
+arm() {                    # impl python program pre-sleep
+  local impl="$1" py="$2" prog="$3" pre="$4"
+  local base="$OUT/unprofiled_execve_${SUFFIX}_${impl}_N${N}_${TAG}"
+  local log="$base.log" pid i
+
+  "$py" "$prog" > "$log" 2>&1 &
+  pid=$!
+  sleep "$pre"
+
+  # GATE: fire the trigger only once the program reports it is polling.
+  # A fixed pre-sleep can expire before attach under strace/perf, losing the
+  # trigger's whole burst with no [LOST] and no way to recover it by draining longer.
+  local ready=0
+  for i in $(seq 1 120); do
+    grep -qaE 'Starting (to )?poll' "$log" && { ready=1; break; }
+    sleep 0.5
+  done
+  [ "$ready" = 1 ] || echo "    [WARN] program never reported polling within 60s"
+
+  sudo -u "$TRIG_USER" "$TRIG_BIN" "$N"
+  sleep "$T"
+
+  kill -INT "$pid" 2>/dev/null || true
+  for i in $(seq 1 40); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
+  kill -0 "$pid" 2>/dev/null && { echo "    [WARN] child alive; killing"; kill -9 "$pid" 2>/dev/null; sleep 1; }
+  grep -q '\[TIMING\] Total CPU' "$log" || echo "    [WARN] teardown missing"
+
+  local sum
+  sum=$(grep -a '\[SUMMARY\]' "$log" | sed -n 's/.*Events in map: *\([0-9]*\).*/\1/p')
+  echo "[DONE] VAR=$VAR impl=$impl N=$N summary=${sum:-MISSING} (expect $((N+1)))  prog=$(basename "$prog")"
+  grep -a '\[TIMING\]\|\[RUSAGE\]\|\[SUMMARY\]\|\[LOST\]' "$log" | sed 's/^/    /'
+}
+
+echo "[START] TAG=$TAG host=$(hostname) VAR=$VAR ($SUFFIX) N=$N UN-PROFILED T=${T}s $(date -Is)"
+echo "  BCC : $PB  md5=$(md5sum $PB | cut -c1-12)"
+echo "  PBPF: $PP  md5=$(md5sum $PP | cut -c1-12)"
+echo "--- arm 1: BCC (pre-sleep 2s) ---"
+arm bcc  "$PY_BCC" "$PB" 2
+echo "[GAP] idle ${GAP}s"; sleep "$GAP"
+echo "--- arm 2: PBPF (pre-sleep 1s) ---"
+arm pbpf "$PY_PB"  "$PP"  1
+echo "[ALL-DONE] TAG=$TAG VAR=$VAR N=$N $(date -Is)"
+touch "$OUT/ALLDONE_${SUFFIX}_N${N}_$TAG"
+</script>
+<script type="text/plain" id="src-enfpb">#!/root/experiment/.venv/bin/python3
+# GhostLock enforcer half. Python-BPF has no in-kernel deny primitive (no BPF-LSM
+# section, no bpf_override_return helper), so the block is a userspace policy
+# action fed by the PBPF signal: kill the task seen issuing FUTEX_CMP_REQUEUE_PI
+# (tag=3). The kernel-side equivalent is the seccomp PI-futex filter from
+# Atlas/Dots/Things/CVE-2026-43499 GhostLock/GhostLock - Mitigation.md.
+#
+# Reads /sys/kernel/tracing/trace_pipe (consuming reader): each printk line from
+# the PBPF program is delivered exactly once.
+import os
+import re
+import signal
+import sys
+import time
+from pythonbpf import bpf, bpfglobal, section, BPF
+from pythonbpf.helper import pid
+from vmlinux import struct_pt_regs
+from ctypes import c_int64
+
+# A pid first seen at tag=3 is acted on once. It stays suppressed only while the
+# task that owns it is still alive. Pids are recycled, so the entry must expire
+# or a kill of pid N hides a later task that is handed pid N.
+REAP_INTERVAL = 2.0
+
+@bpf
+@bpfglobal
+def LICENSE() -> str:
+    return "GPL"
+
+@bpf
+@section("kprobe/do_futex")
+def ghostlock_watch(ctx: struct_pt_regs) -> c_int64:
+    op = ctx.si
+    process_id = pid()
+    tag = 0
+    if op == 12 or op == 140:
+        tag = 3
+    if op == 11 or op == 139:
+        tag = 2
+    if op == 6 or op == 134:
+        tag = 1
+    if tag > 0:
+        print(f"GHOSTLOCK op={op} tag={tag} pid={process_id}")
+    return 0
+
+b = BPF()
+b.load()
+b.attach_all()
+print("ENFORCER-READY", flush=True)
+
+PAT = re.compile(r"GHOSTLOCK op=(\d+) tag=(\d+) pid=(\d+)")
+handled = set()
+self_pid = os.getpid()
+last_reap = 0.0
+
+
+def alive(target):
+    """True if `target` is still a live task (or one we may not signal)."""
+    try:
+        os.kill(target, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+with open("/sys/kernel/tracing/trace_pipe", "r", errors="replace") as f:
+    for line in f:
+        # Expire handles for pids that no longer exist, so a recycled pid is
+        # decided fresh instead of being suppressed forever.
+        now = time.monotonic()
+        if now - last_reap >= REAP_INTERVAL:
+            last_reap = now
+            for key in [k for k in handled if not alive(k[0])]:
+                handled.discard(key)
+
+        m = PAT.search(line)
+        if not m:
+            continue
+        op, tag, target = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if target == self_pid or (target, tag) in handled:
+            continue
+        handled.add((target, tag))
+        print(f"ENFORCER signal op={op} tag={tag} pid={target}", flush=True)
+        if tag == 3:
+            try:
+                os.kill(target, signal.SIGKILL)
+                print(f"ENFORCER KILLED pid={target}", flush=True)
+            except ProcessLookupError:
+                print(f"ENFORCER pid={target} already gone", flush=True)
+</script>
+<script type="text/plain" id="src-enf">#!/usr/bin/env python3
+# GhostLock enforcer half, BCC version.
+#
+# This is the A/B partner of ghostlock_enforce.py (Python-BPF). Same job: watch
+# kprobe/do_futex, tag the GhostLock op set, and act on FUTEX_CMP_REQUEUE_PI.
+#
+# The difference is the helper surface. BCC ships bpf_send_signal, so the signal
+# is raised FROM THE KERNEL PROGRAM rather than read back through trace_pipe.
+# Python-BPF has no such helper, so ghostlock_enforce.py has to print the line,
+# read it in userspace, and os.kill() from there.
+#
+# What is STILL true in this version, and worth saying on the slide:
+#   * bpf_send_signal delivers SIGKILL on return from the tracepoint, which is
+#     AFTER do_futex has run. So the syscall that matters has already executed.
+#     Being in the kernel removes the trace_pipe hop, not the ordering.
+#   * No in-kernel deny. Neither library can say "return an error here instead".
+#     XDP drop is a verdict; a kprobe is not. A seccomp filter acts before the
+#     syscall, which is why it can deny where a signal cannot.
+#
+# Probe point: kprobe/do_futex, matching the Python-BPF tracker. The sys_*
+# wrapper needs a two-step deref for the op; do_futex takes it as a plain arg.
+from bcc import BPF
+
+program = r"""
+// Two headers are deliberately NOT included, and both cost a debugging round:
+//   linux/futex.h -> drags in mutex code clang cannot emit for BPF
+//                    ("call to undeclared function mutex_init")
+//   struct pt_regs -> this kernel forward-declares it only, so BCC's own
+//                    rewrite of a typed kprobe argument ("int op" -> "ctx->di")
+//                    fails with "incomplete definition of type struct pt_regs".
+// So state the op values as integers and give the register frame a local
+// layout. x86-64 pt_regs order is fixed, and the 2nd C argument is in rsi -
+// the same register the Python-BPF tracker reads as ctx.si.
+#define SIGKILL 9
+
+struct pt_regs_x64 {
+    unsigned long r15, r14, r13, r12, rbp, rbx, r11, r10, r9, r8;
+    unsigned long rax, rcx, rdx, rsi, rdi, orig_rax, rip, cs, eflags, rsp, ss;
+};
+#define ARG2(ctx) (((struct pt_regs_x64 *)(ctx))->rsi)
+
+// FUTEX_LOCK_PI=6, FUTEX_WAIT_REQUEUE_PI=11, FUTEX_CMP_REQUEUE_PI=12,
+// plus FUTEX_PRIVATE_FLAG(128) -> 134 / 139 / 140.
+static __always_inline int ghostlock_tag(int op) {
+    if (op == 12 || op == 140) return 3;   // GhostLock trigger
+    if (op == 11 || op == 139) return 2;   // waiter parks
+    if (op == 6  || op == 134) return 1;   // PI chain built
+    return 0;
+}
+
+int do_futex_probe(void *ctx) {
+    int op = (int)ARG2(ctx);
+    int tag = ghostlock_tag(op);
+    if (tag == 0)
+        return 0;
+
+    u32 pid = bpf_get_current_pid_tgid() >> 32;
+    bpf_trace_printk("GHOSTLOCK op=%d tag=%d pid=%d\n", op, tag, pid);
+
+    // The helper Python-BPF does not have. Queues a signal on return from this
+    // probe, which is AFTER do_futex has already done its work.
+    //
+    // The kill itself leaves no line: the program is gone before anything could
+    // print it, and the only trace is the child's exit status. So print the
+    // decision here, before signalling, and let the harness report the rc. The
+    // Python-BPF enforcer can log ENFORCER KILLED because userspace does the
+    // kill; this side has to announce it in advance.
+    if (tag == 3) {
+        bpf_trace_printk("ENFORCER signalling SIGKILL pid=%d\n", pid);
+        bpf_send_signal(SIGKILL);
+    }
+
+    return 0;
+}
+"""
+
+b = BPF(text=program)
+b.attach_kprobe(event="do_futex", fn_name="do_futex_probe")
+print("ENFORCER-READY (bcc, in-kernel signal)", flush=True)
+
+# Keep the process alive while the program is attached. No trace_pipe read is
+# needed for enforcement: the kernel raises the signal itself. Drain the trace
+# pipe only so the log matches the Python-BPF run line for line.
+while True:
+    try:
+        (_, _, pid, _, _, line) = b.trace_fields()
+        print(line.decode().strip(), flush=True)
+    except KeyboardInterrupt:
+        break
+</script>
+<script>
+/* ---------- code stage: render + interact (stand-in for slidev-addon-livecode) ---------- */
+const CS_KW = {
+  py: new Set('import from as def class return if else elif for while in not and or is None True False lambda with try except pass global'.split(' ')),
+  c:  new Set('if else for while return struct char int u32 u64 void sizeof static const define include unsigned long'.split(' ')),
+  sh: new Set('if then else fi for do done local set case esac exit function sudo kill sleep grep echo'.split(' '))
+};
+const csEsc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function csHl(src, lang) {
+  const kw = CS_KW[lang] || new Set();
+  const re = /(#[^\n]*)|(\/\/[^\n]*)|("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')|(@[A-Za-z_]\w*)|\b([A-Za-z_]\w*)\b|(\b\d+(?:\.\d+)?\b)/g;
+  let out = '', last = 0, m;
+  while ((m = re.exec(src))) {
+    out += csEsc(src.slice(last, m.index));
+    const tok = m[0];
+    let cls = '';
+    if (m[1] || m[2]) cls = 'c';
+    else if (m[3]) cls = 's';
+    else if (m[4]) cls = 'd';
+    else if (m[5] && kw.has(m[5])) cls = 'k';
+    else if (m[6]) cls = 'num';
+    out += cls ? '<span class="' + cls + '">' + csEsc(tok) + '</span>' : csEsc(tok);
+    last = m.index + tok.length;
+  }
+  return out + csEsc(src.slice(last));
+}
+function csPark(slide) {
+  slide.querySelectorAll('.cs-pane').forEach(pane => {
+    const line = pane.querySelector('.cs-line');
+    if (!line) return;
+    const lh = line.getBoundingClientRect().height || 16;
+    const from = +(pane.dataset.from || 1);
+    pane.scrollTop = Math.max(0, (from - 1) * lh - lh * 2);
+  });
+}
+
+document.querySelectorAll('.cs').forEach(cs => {
+  const panes = [...cs.querySelectorAll('.cs-pane')];
+  const posEl = cs.querySelector('[data-pos]');
+  let active = panes[0];
+  panes.forEach(pane => {
+    const srcEl = document.getElementById(pane.dataset.src);
+    if (!srcEl) return;
+    const lines = srcEl.textContent.replace(/^\n+/, '').replace(/\s+$/, '').split('\n');
+    const from = +(pane.dataset.from || 1), to = +(pane.dataset.to || lines.length);
+    const head = '<div class="cs-name">' + csEsc(pane.dataset.name || '') +
+      '<span class="cs-range">' + from + '–' + to + '</span></div>';
+    pane.innerHTML = head + lines.map((ln, i) => {
+      const n = i + 1, out = (n < from || n > to);
+      return '<div class="cs-line' + (out ? ' out' : '') + '" data-ln="' + n + '"><span class="n">' + n +
+        '</span><span class="t">' + csHl(ln, pane.dataset.lang) + '</span></div>';
+    }).join('');
+    pane.addEventListener('click', e => {
+      const ln = e.target.closest('.cs-line');
+      if (!ln) return;
+      active = pane;
+      // one pointer per pane: on a split comparison you want BOTH lines marked
+      pane.querySelectorAll('.cs-line.cur').forEach(x => x.classList.remove('cur'));
+      ln.classList.add('cur'); csPos();
+    });
+  });
+  function csPos() {
+    const cur = active.querySelector('.cs-line.cur');
+    const total = active.querySelectorAll('.cs-line').length;
+    const from = active.dataset.from || 1, to = active.dataset.to || total;
+    if (posEl) posEl.textContent = cur ? ('line ' + cur.dataset.ln + ' of ' + total)
+                                       : (from + '–' + to + ' of ' + total);
+  }
+  function csMove(d) {
+    const lines = [...active.querySelectorAll('.cs-line')];
+    let i = lines.findIndex(l => l.classList.contains('cur'));
+    lines.forEach(l => l.classList.remove('cur'));
+    i = (i < 0) ? (d > 0 ? 0 : lines.length - 1) : Math.max(0, Math.min(lines.length - 1, i + d));
+    lines[i].classList.add('cur');
+    lines[i].scrollIntoView({ block: 'nearest' });
+    csPos();
+  }
+  cs.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { csMove(1); e.preventDefault(); e.stopPropagation(); }
+    else if (e.key === 'ArrowUp') { csMove(-1); e.preventDefault(); e.stopPropagation(); }
+  });
+  csPos();
+});
+
+/* ---------------------------------------------------------------------------
+   Navigation = stage + slides. → reveals the next step on this slide, then
+   moves on; ← undoes the last reveal before leaving the slide, so nothing
+   jumps while you talk. Slides marked data-single skip straight past.
+--------------------------------------------------------------------------- */
+const slides = [...document.querySelectorAll('.slide')];
+const counter = document.querySelector('.counter');
+const spine = document.querySelector('.spine');
+const panel = document.getElementById('notes-panel');
+const notesNum = document.getElementById('notes-num');
+const notesText = document.getElementById('notes-text');
+const DIVIDERS = [...document.querySelectorAll('.slide[data-sec]')];
+const SECTIONS = new Set(DIVIDERS.map(el => slides.indexOf(el) + 1));
+let i = 0, notesOpen = false;
+let notifyPresent = () => {};
+let presenterMode = false;   // true in the notes window: it must not navigate itself
+
+slides.forEach((s, n) => {
+  const t = document.createElement('div');
+  t.className = 't' + (SECTIONS.has(n + 1) ? ' sec' : '');
+  t.style.left = ((n + 0.5) / slides.length) * 100 + '%';
+  spine.appendChild(t);
+});
+const ticks = [...spine.children];
+
+const reveals = (s) => [...s.querySelectorAll('.rv')];
+const press = (s) => s.querySelector('.press');
+
+function paintBar(el) {
+  const w = el.dataset.w;
+  if (el.dataset.kind === 'v') {                    // vertical bar
+    const h = +el.dataset.h;
+    el.style.height = h + 'px';
+    el.style.transform = 'translateY(' + (-h) + 'px)';
+  } else {
+    el.style.width = w + '%';
+    const bv = el.parentElement.querySelector('.bv[data-at="' + w + '"]');
+    if (bv) bv.style.left = 'calc(' + w + '% + 10px)';
+  }
+}
+function resetBars(s) { s.querySelectorAll('[data-w]').forEach(el => {
+  if (el.dataset.kind === 'v') { el.style.height = '0'; el.style.transform = 'translateY(0)'; }
+  else el.style.width = '0';
+}); }
+
+function fireReveal(s) {
+  if (typeof oscState === 'function') setTimeout(oscState, 0);
+  if (typeof notifyPresent === 'function') setTimeout(notifyPresent, 0);
+  const next = reveals(s).find(e => !e.classList.contains('on'));
+  if (!next) return false;
+  next.classList.add('on');
+  const bars = next.matches('[data-w]') ? [next] : [...next.querySelectorAll('[data-w]')];
+  bars.forEach(paintBar);
+  syncFigure(s);
+  if (!reveals(s).some(e => !e.classList.contains('on'))) { const p = press(s); if (p) p.classList.remove('on'); }
+  return true;
+}
+function undoReveal(s) {
+  if (typeof oscState === 'function') setTimeout(oscState, 0);
+  if (typeof notifyPresent === 'function') setTimeout(notifyPresent, 0);
+  const open = reveals(s).filter(e => e.classList.contains('on'));
+  const last = open[open.length - 1];
+  if (!last) return false;
+  last.classList.remove('on');
+  const bars = last.matches('[data-w]') ? [last] : [...last.querySelectorAll('[data-w]')];
+  bars.forEach(el => { if (el.dataset.kind === 'v') { el.style.height = '0'; el.style.transform = 'translateY(0)'; } else el.style.width = '0'; });
+  syncFigure(s);
+  const p = press(s); if (p) p.classList.add('on');
+  return true;
+}
+
+/* three-term figure lights up one bracket per reveal */
+function syncFigure(s) { /* the figure is fully visible on entry: no dimming */ }
+
+function resetSlide(s) {
+  reveals(s).forEach(e => e.classList.remove('on'));
+  resetBars(s);
+  s.querySelectorAll('.fig .seg').forEach(e => e.classList.remove('latent'));
+}
+
+function onEnter(n) {
+  const s = slides[n];
+  const p = press(s);
+  if (p && reveals(s).some(e => !e.classList.contains('on'))) p.classList.add('on');
+  // bars that are not reveal-driven must be painted on entry, or they stay at width 0
+  s.querySelectorAll('[data-w]:not(.rv)').forEach(paintBar);
+  csPark(s);
+}
+/* first slide: paint any static bars that are not reveal-driven */
+function firstPaint(s) {
+  s.querySelectorAll('[data-w]:not(.rv)').forEach(paintBar);
+}
+
+function go(n) {
+  if (n < 0 || n >= slides.length || n === i) return;
+  slides[i].classList.remove('active');
+  resetSlide(slides[i]);
+  i = n;
+  slides[i].classList.add('active');
+  counter.textContent = (i + 1) + ' / ' + slides.length;
+  ticks.forEach((t, k) => t.classList.toggle('on', k === i));
+  history.replaceState(null, '', '#' + (i + 1));
+  onEnter(i);
+  if (notesOpen) showNotes();
+  notifyPresent();
+  if (typeof oscState === 'function') oscState();
+  if (typeof overviewOn !== 'undefined' && overviewOn) layoutOverview();
+  if (typeof IN_PRESENTER !== 'undefined' && IN_PRESENTER) paintPresenter();
+}
+function next() {
+  const s = slides[i];
+  if (s.dataset.single === undefined && fireReveal(s)) return;
+  const p = press(s); if (p) p.classList.remove('on');
+  go(i + 1);
+}
+function prev() {
+  if (slides[i].dataset.single === undefined && undoReveal(slides[i])) return;
+  go(i - 1);
+}
+
+function showNotes() {
+  const s = slides[i];
+  const el = s.querySelector('.notes');
+  notesNum.textContent = 'Slide ' + (i + 1) + ' / ' + slides.length;
+  notesText.innerHTML = (s.dataset.notes || (el && el.innerHTML.trim()) || '(no notes)');
+}
+function toggleNotes() {
+  notesOpen = !notesOpen;
+  panel.classList.toggle('open', notesOpen);
+  if (notesOpen) showNotes();
+}
+
+addEventListener('keydown', (e) => {
+  const t = e.target.tagName;
+  if (t === 'INPUT' || t === 'TEXTAREA') return;
+  const k = e.key;
+  if (k === 'ArrowRight' || k === ' ' || k === 'PageDown' || k === 'ArrowDown') next();
+  else if (k === 'ArrowLeft' || k === 'PageUp' || k === 'ArrowUp') prev();
+  else if (k === 'Home') go(0);
+  else if (k === 'End') go(slides.length - 1);
+  else if (k === 's' || k === 'S') toggleNotes();
+  else if (k === 'f' || k === 'F') toggleFullscreen();
+  else if (k === 'o' || k === 'O') toggleOverview();
+  else if (k === 'Escape' && typeof overviewOn !== 'undefined' && overviewOn) toggleOverview(false);
+  else return;
+  e.preventDefault();
+});
+
+document.addEventListener('click', (e) => {
+  if (e.target.closest('a, button, #notes-panel, .rt[data-go], .cs')) return;
+  // in presenter view the notes pane and the dragbar keep their own clicks
+  if (presenterMode && e.target.closest('.pv-note, .pv-drag')) return;
+  next();                                    // click forward; ← goes back
+});
+
+/* close slide: click an answer to jump back to that part's divider */
+document.querySelectorAll('.rt[data-go]').forEach(el => {
+  el.style.cursor = 'pointer';
+  el.addEventListener('click', () => {
+    const d = document.querySelector('.slide[data-sec="' + el.dataset.go + '"]');
+    if (d) go(slides.indexOf(d));
+  });
+});
+
+let touchX = 0;
+addEventListener('touchstart', (e) => { touchX = e.touches[0].clientX; }, { passive: true });
+addEventListener('touchend', (e) => {
+  if (presenterMode) return;
+  const d = touchX - e.changedTouches[0].clientX;
+  if (Math.abs(d) > 50) (d > 0 ? next() : prev());
+}, { passive: true });
+
+/* one transform for the whole stage: nothing inside can scale twice */
+const stage = document.querySelector('.stage');
+function fit() {
+  const z = Math.min(innerWidth / 1280, innerHeight / 720);
+  stage.style.transform = 'scale(' + z + ')';
+  stage.style.left = ((innerWidth - 1280 * z) / 2) + 'px';
+  stage.style.top = ((innerHeight - 720 * z) / 2) + 'px';
+}
+addEventListener('resize', fit);
+fit();
+
+/* ---------- OSC: same contract as marp-cli's bespoke OSC ---------- */
+const osc = document.querySelector('.osc');
+let oscIdle = null;
+
+function oscShow() {
+  if (!osc) return;
+  osc.setAttribute('aria-hidden', 'false');
+  clearTimeout(oscIdle);
+  oscIdle = setTimeout(() => {
+    if (!osc.matches(':hover') && !osc.contains(document.activeElement)) osc.setAttribute('aria-hidden', 'true');
+  }, 2600);
+}
+function oscState() {
+  if (!osc) return;
+  osc.querySelector('[data-osc="page"]').textContent = 'Page ' + (i + 1) + ' of ' + slides.length;
+  const prevBtn = osc.querySelector('[data-osc="prev"]');
+  const nextBtn = osc.querySelector('[data-osc="next"]');
+  const s = slides[i];
+  const rv = s.querySelectorAll('.rv').length;
+  const shown = s.querySelectorAll('.rv.on').length;
+  prevBtn.disabled = (i === 0 && shown === 0);
+  nextBtn.disabled = (i === slides.length - 1 && shown >= rv);
+}
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+  else document.exitFullscreen();
+}
+function syncFullscreenBtn() {
+  const b = osc && osc.querySelector('[data-osc="fullscreen"]');
+  if (b) b.classList.toggle('exit', !!document.fullscreenElement);
+}
+document.addEventListener('fullscreenchange', syncFullscreenBtn);
+
+/* ---------- overview view ---------- */
+let overviewOn = false;
+function buildOverview() {
+  const grid = document.getElementById('ov-grid');
+  if (grid.dataset.built) return;
+  slides.forEach((s, k) => {
+    const cell = document.createElement('div');
+    cell.className = 'ov-cell';
+    cell.dataset.go = k;
+    const scale = document.createElement('div');
+    scale.className = 'ov-scale';
+    const clone = s.cloneNode(true);
+    clone.classList.add('active');
+    clone.removeAttribute('data-notes');
+    clone.querySelectorAll('.rv').forEach(x => x.classList.add('on'));
+    clone.querySelectorAll('[data-w]').forEach(b => {
+      if (b.dataset.kind === 'v') { const hh = +b.dataset.h; b.style.height = hh + 'px'; b.style.transform = 'translateY(' + (-hh) + 'px)'; }
+      else b.style.width = b.dataset.w + '%';
+    });
+    scale.appendChild(clone);
+    const num = document.createElement('span');
+    num.className = 'ov-num';
+    num.textContent = k + 1;
+    cell.appendChild(scale); cell.appendChild(num);
+    cell.addEventListener('click', () => { go(k); toggleOverview(false); });
+    grid.appendChild(cell);
+  });
+  grid.dataset.built = '1';
+}
+function layoutOverview() {
+  document.querySelectorAll('.ov-cell').forEach((cell, k) => {
+    const z = cell.clientWidth / 1280;
+    const sc = cell.querySelector('.ov-scale');
+    sc.style.transform = 'scale(' + z + ')';
+    cell.classList.toggle('on', k === i);
+  });
+}
+function toggleOverview(force) {
+  const ov = document.querySelector('.overview');
+  if (!ov) return;                       // presenter view has no overview overlay
+  overviewOn = (force === undefined) ? !overviewOn : force;
+  ov.setAttribute('aria-hidden', overviewOn ? 'false' : 'true');
+  if (overviewOn) { buildOverview(); layoutOverview(); }
+}
+addEventListener('resize', () => { if (overviewOn) layoutOverview(); });
+
+if (osc) {
+  osc.addEventListener('click', e => {
+    const btn = e.target.closest('[data-osc]');
+    if (!btn) return;
+    const kind = btn.dataset.osc;
+    btn.blur();
+    if (kind === 'next') next();
+    else if (kind === 'prev') prev();
+    else if (kind === 'fullscreen') toggleFullscreen();
+    else if (kind === 'presenter') openPresenter();
+    else if (kind === 'overview') toggleOverview();
+  });
+  addEventListener('mousemove', oscShow);
+  addEventListener('keydown', () => oscShow());
+  oscState();
+  oscShow();
+}
+
+/* ---------- print: finish every slide before the pages are captured ---------- */
+addEventListener('beforeprint', () => {
+  document.querySelectorAll('.slide').forEach(s => {
+    s.classList.add('active');
+    s.querySelectorAll('.rv').forEach(e => e.classList.add('on'));
+    s.querySelectorAll('[data-w]').forEach(paintBar);
+    s.classList.remove('active');
+  });
+  // code panes: park on the discussed block instead of wherever the reader left it
+  document.querySelectorAll('.cs-pane').forEach(p => {
+    const line = p.querySelector('.cs-line');
+    if (!line) return;
+    const lh = line.getBoundingClientRect().height || 16;
+    p.scrollTop = Math.max(0, (+(p.dataset.from || 1) - 1) * lh - lh * 2);
+  });
+});
+
+/* ============================================================================
+   PRESENTER — clone of marp-cli's Bespoke mechanism
+     * same file, different query:  ?view=presenter&sync=<key>
+     * state travels through a localStorage key + the `storage` event
+     * `p` opens the window at 85% of the current window, like Marp's normal-view
+   ============================================================================ */
+const params = new URLSearchParams(location.search);
+const VIEW = params.get('view') || '';
+const IN_PRESENTER = VIEW === 'presenter';
+const SYNC_KEY = params.get('sync') || Math.random().toString(36).slice(2);
+const SYNC_STORE = 'deck-sync-' + SYNC_KEY;
+
+const storageOK = (() => {
+  try { localStorage.setItem('deck-probe', '1'); localStorage.removeItem('deck-probe'); return true; }
+  catch (e) { return false; }
+})();
+
+let applyingSync = false;
+
+function revealCount() {
+  return document.querySelectorAll('.slide')[i].querySelectorAll('.rv.on').length;
+}
+function applyRevealCount(n) {
+  const s = document.querySelectorAll('.slide')[i];
+  const rvs = [...s.querySelectorAll('.rv')];
+  rvs.forEach((el, k) => {
+    const on = k < n;
+    if (on === el.classList.contains('on')) return;
+    if (on) {
+      el.classList.add('on');
+      const bars = el.matches('[data-w]') ? [el] : [...el.querySelectorAll('[data-w]')];
+      bars.forEach(paintBar);
+    } else {
+      el.classList.remove('on');
+      const bars = el.matches('[data-w]') ? [el] : [...el.querySelectorAll('[data-w]')];
+      bars.forEach(b => { if (b.dataset.kind === 'v') { b.style.height = '0'; b.style.transform = 'translateY(0)'; } else b.style.width = '0'; });
+    }
+  });
+}
+function publish() {
+  if (applyingSync) return;
+  const state = JSON.stringify({ index: i, reveals: revealCount(), at: Date.now() });
+  if (storageOK) { try { localStorage.setItem(SYNC_STORE, state); } catch (e) {} }
+  // storage events never fire in the writing window, and not at all on file:// in some browsers
+  if (presentWin && !presentWin.closed) presentWin.postMessage({ type: 'state', state }, '*');
+  if (window.opener && !window.opener.closed) window.opener.postMessage({ type: 'state', state }, '*');
+}
+notifyPresent = publish;   // go() fans this out to the other window
+
+function readState(raw) {
+  let s;
+  try { s = JSON.parse(raw); } catch (e) { return; }
+  if (!s || typeof s.index !== 'number') return;
+  applyingSync = true;
+  try {
+    if (s.index !== i) go(s.index);
+    if (typeof s.reveals === 'number') applyRevealCount(s.reveals);
+  } finally { applyingSync = false; }
+  if (IN_PRESENTER) paintPresenter();
+}
+if (storageOK) {
+  addEventListener('storage', e => { if (e.key === SYNC_STORE && e.newValue) readState(e.newValue); });
+}
+addEventListener('message', e => {
+  const d = e.data || {};
+  if (d.type === 'state') readState(d.state);
+});
+
+/* ---------- presenter window ---------- */
+let presentWin = null;
+let timerStart = null;
+let noteScale = 1;
+
+function presenterUrl() {
+  const p = new URLSearchParams(location.search);
+  p.set('view', 'presenter');
+  p.set('sync', SYNC_KEY);
+  return location.pathname + '?' + p.toString();
+}
+function openPresenter() {
+  if (presentWin && !presentWin.closed) { presentWin.focus(); return; }
+  const w = Math.max(Math.floor(innerWidth * 0.85), 640);
+  const h = Math.max(Math.floor(innerHeight * 0.85), 360);
+  presentWin = window.open(presenterUrl(), 'deck-presenter-' + SYNC_KEY,
+    'width=' + w + ',height=' + h + ',menubar=no,toolbar=no');
+  const btn = document.getElementById('btn-present');
+  if (btn) btn.classList.toggle('on', !!presentWin);
+  if (presentWin) {
+    timerStart = Date.now();
+    setTimeout(publish, 400);
+    presentWin.addEventListener('beforeunload', () => { if (btn) btn.classList.remove('on'); presentWin = null; });
+  }
+}
+
+/* notes for a slide: the data-notes attribute wins, then an <aside class="notes"> */
+function notesOf(slide) {
+  const el = slide.querySelector('.notes');
+  return slide.dataset.notes || (el && el.innerHTML.trim()) ||
+    '<p style="color:#5b6b80">(no notes for this slide)</p>';
+}
+
+/* ---------- presenter layout (Marp's grid) ---------- */
+let pvTimer = null;
+function paintPresenter() {
+  if (!IN_PRESENTER) return;
+  const host = document.getElementById('pv-next');
+  if (!host) return;
+  host.innerHTML = '';
+  const n = i + 1;
+  if (n < slides.length) {
+    const frame = host.parentElement.getBoundingClientRect();
+    const z = Math.max(0, (frame.width - 40) / 1280);
+    const el = slides[n].cloneNode(true);
+    el.classList.add('active');
+    el.removeAttribute('data-notes');
+    el.querySelectorAll('.rv').forEach(x => x.classList.add('on'));
+    el.querySelectorAll('[data-w]').forEach(b => {
+      if (b.dataset.kind === 'v') { const hh = +b.dataset.h; b.style.height = hh + 'px'; b.style.transform = 'translateY(' + (-hh) + 'px)'; }
+      else b.style.width = b.dataset.w + '%';
+    });
+    el.style.cssText += 'position:absolute;width:1280px;height:720px;transform:scale(' + z + ');transform-origin:top left;';
+    host.appendChild(el);
+  } else {
+    host.innerHTML = '<div class="pv-next-empty">end of deck</div>';
+  }
+  const noteBody = document.getElementById('pv-note-body');
+  if (noteBody) noteBody.innerHTML = notesOf(slides[i]);
+  const page = document.getElementById('pv-page');
+  if (page) page.textContent = (i + 1) + ' / ' + slides.length;
+  const prev = document.getElementById('pv-prev'), next = document.getElementById('pv-next-btn');
+  if (prev) prev.disabled = i === 0;
+  if (next) next.disabled = i === slides.length - 1;
+  document.title = '[Presenter view] ' + (i + 1) + '/' + slides.length;
+}
+
+function buildPresenter() {
+  const body = document.body;
+  body.dataset.view = 'presenter';
+  const pv = document.createElement('div');
+  pv.className = 'pv';
+  pv.innerHTML =
+    '<div class="pv-current"></div>' +
+    '<div class="pv-drag"></div>' +
+    '<div class="pv-next"><div class="pv-scaler" id="pv-next"></div></div>' +
+    '<div class="pv-note"><div class="pv-note-body" id="pv-note-body"></div>' +
+      '<div class="pv-note-btns"><button id="pv-smaller" title="Smaller notes">–</button>' +
+      '<button id="pv-bigger" title="Bigger notes">+</button></div></div>' +
+    '<div class="pv-info"><button id="pv-prev" title="Previous">‹</button>' +
+      '<button class="pv-page" id="pv-page"></button>' +
+      '<button id="pv-next-btn" title="Next">›</button>' +
+      '<span class="pv-clock" id="pv-clock"></span>' +
+      '<span class="pv-timer" id="pv-timer" title="Click to reset the timer">0:00:00</span></div>';
+  body.appendChild(pv);
+
+  const stage = document.querySelector('.stage');
+  pv.querySelector('.pv-current').appendChild(stage);
+  stage.style.position = 'absolute';
+
+  // the deck's own scaled stage is re-fitted to the left pane
+  fitStage();
+  addEventListener('resize', () => { fitStage(); paintPresenter(); });
+
+  // dragbar resizes the split, like Marp's --bespoke-marp-presenter-split-ratio
+  const drag = pv.querySelector('.pv-drag');
+  let dragging = false;
+  drag.addEventListener('mousedown', () => { dragging = true; drag.classList.add('active'); });
+  addEventListener('mouseup', () => { dragging = false; drag.classList.remove('active'); });
+  addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const pct = Math.max(0, Math.min(100, (e.clientX / document.documentElement.clientWidth) * 100));
+    pv.style.setProperty('--pv-split', pct + '%');
+    fitStage(); paintPresenter();
+  });
+
+  document.getElementById('pv-prev').addEventListener('click', e => { (e.shiftKey ? prev() : prev()); });
+  document.getElementById('pv-next-btn').addEventListener('click', () => next());
+  document.getElementById('pv-page').addEventListener('click', () => {});
+
+  const scaleNotes = d => {
+    noteScale = Math.max(0.6, Math.min(2.6, noteScale + d));
+    document.querySelector('.pv-note').style.setProperty('--pv-note-scale', noteScale.toFixed(2));
+  };
+  document.getElementById('pv-bigger').addEventListener('click', () => scaleNotes(0.15));
+  document.getElementById('pv-smaller').addEventListener('click', () => scaleNotes(-0.15));
+
+  // clock + timer (Marp's info row)
+  timerStart = timerStart || Date.now();
+  const tick = () => {
+    const now = new Date();
+    document.getElementById('pv-clock').textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const s = Math.floor((Date.now() - timerStart) / 1000);
+    const pad = v => String(v).padStart(2, '0');
+    document.getElementById('pv-timer').textContent =
+      Math.floor(s / 3600) + ':' + pad(Math.floor(s / 60) % 60) + ':' + pad(s % 60);
+  };
+  tick();
+  pvTimer = setInterval(tick, 1000);
+  document.getElementById('pv-timer').addEventListener('click', () => { timerStart = Date.now(); tick(); });
+
+  paintPresenter();
+}
+
+function fitStage() {
+  const host = document.querySelector('.pv-current');
+  const z = host ? Math.min(host.clientWidth / 1280, host.clientHeight / 720) : Math.min(innerWidth / 1280, innerHeight / 720);
+  const stage = document.querySelector('.stage');
+  stage.style.transform = 'scale(' + z + ')';
+  if (host) {
+    stage.style.left = ((host.clientWidth - 1280 * z) / 2) + 'px';
+    stage.style.top = ((host.clientHeight - 720 * z) / 2) + 'px';
+  } else {
+    stage.style.left = ((innerWidth - 1280 * z) / 2) + 'px';
+    stage.style.top = ((innerHeight - 720 * z) / 2) + 'px';
+  }
+}
+
+if (IN_PRESENTER) {
+  presenterMode = true;
+  if (osc) osc.remove();
+  const ov = document.querySelector('.overview'); if (ov) ov.remove();
+  buildPresenter();
+} else {
+  // `p` opens presenter view, exactly like marp-cli's normal-view plugin
+  addEventListener('keydown', e => {
+    if (e.key === 'p' && !e.altKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); openPresenter(); }
+  });
+}
+
+const start = parseInt(location.hash.slice(1), 10) - 1;
+slides[0].classList.remove('active');
+i = start > 0 && start < slides.length ? start : 0;
+slides[i].classList.add('active');
+counter.textContent = (i + 1) + ' / ' + slides.length;
+ticks.forEach((t, k) => t.classList.toggle('on', k === i));
+onEnter(i);
+</script>
+</body>
+</html>
