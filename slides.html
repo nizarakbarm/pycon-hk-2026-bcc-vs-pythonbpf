@@ -142,6 +142,7 @@ pre .s{color:#ffd343}
 pre .f{color:#95bdff}
 pre .d{color:#c7b8ff}
 pre .hl{background:rgba(255,211,67,.18);border-radius:4px;color:#fff;font-weight:700}
+.pele-diagram{display:block;width:100%;height:auto;align-self:start;background:#fff;border:1px solid #d9cdb8;border-radius:10px;padding:6px}
 .codehead{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:14px;color:var(--muted)}
 .codehead .tag{background:var(--card)}
 .codepair{display:grid;grid-template-columns:1fr 1fr;gap:22px}
@@ -800,16 +801,14 @@ libstdc++.so.6         libm.so.6         libgcc_s.so.1  libc.so.6</span></pre>
         <p class="muted" style="font-size:14px;line-height:1.4;margin-top:6px">Entry reads <span class="mono">ctx.di</span>, <span class="mono">ctx.si</span>. Exit reads <span class="mono">ctx.ax</span>. Both annotate <span class="mono">ctx: struct_pt_regs</span>, so both hit one node.</p>
       </div>
       <div>
-        <pre style="font-size:12px;line-height:1.38;padding:12px 14px">fn A  kprobe     --+  reads ctx.di, ctx.si
-                    |
-fn B  kretprobe  --+--> DILocalVariable   ONE object
-                            |  scope
-                            v
-                     DISubprogram
-                            |  retainedNodes
-                            +--> back to DILocalVariable
-
-hash(operands) walks the ring</pre>
+        <!-- Mermaid source, rendered by Pele 1.13.0 to images/limit2-node-loop.svg:
+             flowchart LR
+               A["fn A kprobe&lt;br/&gt;ctx.di, ctx.si"] --&gt; N
+               B["fn B kretprobe&lt;br/&gt;ctx.ax"] --&gt; N
+               N["DILocalVariable&lt;br/&gt;one object, both functions"] -- scope --&gt; S["DISubprogram&lt;br/&gt;retainedNodes"]
+               S -. back reference .-&gt; N
+             Regenerate with /tmp/pele-render/render2.mjs (bun render2.mjs). -->
+        <img class="pele-diagram" src="images/limit2-node-loop.svg" alt="Two sections, fn A kprobe and fn B kretprobe, both point at one DILocalVariable node. The node points to DISubprogram by scope. DISubprogram points back to the node by retainedNodes. The loop makes hashing recurse.">
       </div>
     </div>
     <p class="callout rv"><span class="mono">RecursionError</span> in <span class="mono">Module.add_debug_info</span> to <span class="mono">hash(DILocalVariable)</span>. Fix: build the node outside the cache. Until then: <b>one section per file</b>.</p>
