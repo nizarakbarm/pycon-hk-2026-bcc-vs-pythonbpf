@@ -790,23 +790,24 @@ libstdc++.so.6         libm.so.6         libgcc_s.so.1  libc.so.6</span></pre>
     <p class="lead">Two sections with the same context annotation share <b>one</b> <span class="mono">DILocalVariable</span> debug node. llvmlite merges equal nodes. Python-BPF then adds <span class="mono">scope</span> to that node.</p>
     <div class="codepair" style="align-items:start">
       <div>
-        <table style="font-size:16px">
+        <table style="font-size:15px">
           <tr><th>debug node</th><th>shared by cache</th><th>cycle</th></tr>
           <tr><td class="mono">DIDerivedType</td><td>yes</td><td class="good">no</td></tr>
           <tr><td class="mono">DISubroutineType</td><td>yes</td><td class="good">no</td></tr>
           <tr><td class="mono">DILocalVariable</td><td class="warn">yes</td><td class="warn">yes</td></tr>
           <tr><td class="mono">DISubprogram</td><td class="good">no, name differs</td><td class="warn">holds the loop</td></tr>
         </table>
-        <p class="muted" style="font-size:15px;margin-top:10px">The merged node is the one that gets mutated.</p>
+        <p class="muted" style="font-size:14px;line-height:1.4;margin-top:6px">Entry reads <span class="mono">ctx.di</span>, <span class="mono">ctx.si</span>. Exit reads <span class="mono">ctx.ax</span>. Both annotate <span class="mono">ctx: struct_pt_regs</span>, so both hit one node.</p>
       </div>
       <div>
-        <pre style="font-size:12px;line-height:1.5;padding:14px 16px">fn A  kprobe    --+
-                   +--> DILocalVariable   (one object)
-fn B  kretprobe  --+          | scope
-                              v
-                       DISubprogram
-                              | retainedNodes
-                              +--> back to DILocalVariable
+        <pre style="font-size:12px;line-height:1.38;padding:12px 14px">fn A  kprobe     --+  reads ctx.di, ctx.si
+                    |
+fn B  kretprobe  --+--> DILocalVariable   ONE object
+                            |  scope
+                            v
+                     DISubprogram
+                            |  retainedNodes
+                            +--> back to DILocalVariable
 
 hash(operands) walks the ring</pre>
       </div>
