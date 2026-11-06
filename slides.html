@@ -800,18 +800,33 @@ libstdc++.so.6         libm.so.6         libgcc_s.so.1  libc.so.6</span></pre>
 </section>
 
 <!-- ================= 28 · LIMIT 3 KERNEL STRING ================= -->
-<section class="slide" data-art="content" data-notes="<p>Ask the room: what does ctx.si hold here? A struct filename pointer, the second argument register.</p><p>The table is the three documented attempts, each with its real error. First row: cast to the vmlinux struct type and read its name field, probe_read reports Struct type not found, because vmlinux ctypes stubs are not registered in the compiler's struct symbol table. Second row: allocate a local @struct with a str(256) field and read into it, ValueError Variable 'buf' not found, because the struct constructor never registers the variable in the local symbol table. Third row: a c_uint64 buffer, which compiles and reads only 8 bytes, so a filename truncates.</p><p>Click 1: the only thing that works. probe_read with an 8 byte destination returns the struct's name pointer, 0xffff8f2d4705c000, which is a valid kernel address in the 0xffff8 range. So the helper works and the read succeeds.</p><p>Click 2: the correction, and the reason this slide used to be wrong. The title of the source note says &quot;returns garbage&quot;, and the note itself says that title is wrong. The value is a valid pointer. What is missing is the second dereference: probe_read leaves a loaded i64, and probe_read_str wants an i8* pointer, so the emitter would need to insert inttoptr. It does not, and that is the gap.</p><p>Source: &quot;Python-BPF Probe Read of ctx.si Returns Garbage&quot;, 2026-07-25, measured on Python-BPF 0.1.9. BCC does this in one C expression: (struct filename *)PT_REGS_PARM2(ctx) then fname->name, because clang emits the offset dereference for you.</p>">
+<section class="slide" data-art="content" data-notes="<p>Program: kprobe_unlink.py, @section(&quot;kprobe/do_unlinkat&quot;) — a kprobe on do_unlinkat, so ctx.di is dfd and ctx.si is arg 2, a struct filename*. Nothing here is a syscall tracepoint; the register pair is why arg 2 is si.</p><p>Ask the room: what does ctx.si hold here? A struct filename pointer, the second argument register.</p><p>The table is the three documented attempts, each with its real error. First row: cast to the vmlinux struct type and read its name field, probe_read reports Struct type not found, because vmlinux ctypes stubs are not registered in the compiler's struct symbol table. Second row: allocate a local @struct with a str(256) field and read into it, ValueError Variable 'buf' not found, because the struct constructor never registers the variable in the local symbol table. Third row: a c_uint64 buffer, which compiles and reads only 8 bytes, so a filename truncates.</p><p>Click 1: the only thing that works. probe_read with an 8 byte destination returns the struct's name pointer, 0xffff8f2d4705c000, which is a valid kernel address in the 0xffff8 range. So the helper works and the read succeeds.</p><p>Click 2: the correction, and the reason this slide used to be wrong. The title of the source note says &quot;returns garbage&quot;, and the note itself says that title is wrong. The value is a valid pointer. What is missing is the second dereference: probe_read leaves a loaded i64, and probe_read_str wants an i8* pointer, so the emitter would need to insert inttoptr. It does not, and that is the gap.</p><p>Source: &quot;Python-BPF Probe Read of ctx.si Returns Garbage&quot;, 2026-07-25, measured on Python-BPF 0.1.9. BCC does this in one C expression: (struct filename *)PT_REGS_PARM2(ctx) then fname->name, because clang emits the offset dereference for you.</p>">
   <div class="hdr"><span class="eyebrow">Part 4 · limit 3</span><span class="who">reading a kernel string</span></div>
   <div class="body">
-    <p class="lead"><span class="mono">ctx.si</span> holds a <span class="mono">struct filename *</span>. Three attempts to read its name:</p>
-    <table style="font-size:19px">
+    <p class="lead"><b>Program:</b> <span class="mono">kprobe_unlink.py</span> — <span class="mono">@section("kprobe/do_unlinkat")</span>, a kprobe on <span class="mono">do_unlinkat</span>: <span class="mono">ctx.di</span> is <span class="mono">dfd</span>, <span class="mono">ctx.si</span> is arg 2, a <span class="mono">struct filename *</span>. Three attempts to read its name:</p>
+    <div class="codepair" style="align-items:start">
+    <div>
+    <table style="font-size:17px">
       <tr><th>attempt</th><th>helper</th><th>result</th></tr>
       <tr><td>read <span class="mono">struct filename.name</span></td><td class="mono">probe_read</td><td class="warn">Struct type … not found</td></tr>
       <tr><td>read into local <span class="mono">str(256)</span></td><td class="mono">probe_read_str</td><td class="warn">Variable 'buf' not found</td></tr>
       <tr><td>read into <span class="mono">c_uint64</span></td><td class="mono">probe_read_str</td><td class="warn">8 bytes — truncates</td></tr>
     </table>
-    <p class="lead rv">What works reads the <b>pointer, not the string</b>: <span class="mono">0xffff8f2d4705c000</span> — a valid kernel address.</p>
     <p class="callout rv">Not garbage: the <b>second dereference</b> is missing. <span class="mono">probe_read</span> gives an <span class="mono">i64</span>; <span class="mono">probe_read_str</span> wants an <span class="mono">i8*</span>. No <span class="mono">inttoptr</span>.</p>
+    </div>
+    <div>
+      <div class="codehead"><span class="tag">kprobe_unlink.py · only version that compiles</span></div>
+      <pre style="font-size:13.5px;line-height:1.55;padding:14px 16px">@bpf
+@section("kprobe/do_unlinkat")
+def do_unlinkat_entry(ctx: struct_pt_regs) -> c_int64:
+    fname_ptr = ctx.si          # struct filename *, arg 2
+    name_str  = 0               # 8-byte stack slot
+    probe_read(name_str, 8, fname_ptr)
+    print(f"name={name_str}")   # 0xffff8f2d4705c000
+    return 0</pre>
+      <p class="muted" style="font-size:15px;margin-top:8px">Reads the <span class="mono">name</span> pointer as a signed <span class="mono">i64</span> — the string itself is never dereferenced.</p>
+    </div>
+    </div>
   </div>
   <div class="foot"><span class="muted">Measured on Python-BPF 0.1.9 · note of 2026-07-25.</span><span class="presswrap"><span class="press">press →</span></span></div>
 </section>
