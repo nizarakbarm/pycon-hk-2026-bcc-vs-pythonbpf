@@ -1,4 +1,4 @@
-# BCC vs PythonBPF — PyCon HK 2026
+# Python eBPF — BCC C-String Runtime vs Python-BPF AST Ahead of Time
 
 Self-contained HTML deck. No build step, no CDN.
 
@@ -9,4 +9,4 @@ Self-contained HTML deck. No build step, no CDN.
 
 Raw benchmark logs and outlines are kept in the authoring repo, not published.
 
-PDF: open `slides.html`, print at 1280x720.
+PDF: `outputs/presentation.pdf`
