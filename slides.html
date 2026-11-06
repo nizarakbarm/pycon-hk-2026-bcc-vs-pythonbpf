@@ -215,8 +215,6 @@ td.mono,td .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
   white-space:pre;color:#e6edf3;cursor:pointer}
 .cs-line .n{width:30px;text-align:right;color:#5b6b80;flex:none;user-select:none}
 .cs-line:hover{background:rgba(255,255,255,.04)}
-.cs-line.out{opacity:.3}
-.cs-line.out:hover{opacity:.75}
 .cs-line.cur{background:rgba(255,211,67,.15);box-shadow:inset 3px 0 0 var(--yellow)}
 .cs-line.cur .n{color:var(--yellow)}
 .cs-line .c{color:#8b98ad}.cs-line .k{color:#ff9aa2}.cs-line .s{color:#ffd343}
@@ -1451,8 +1449,8 @@ document.querySelectorAll('.cs').forEach(cs => {
     const head = '<div class="cs-name">' + csEsc(pane.dataset.name || '') +
       '<span class="cs-range">' + from + '–' + to + '</span></div>';
     pane.innerHTML = head + lines.map((ln, i) => {
-      const n = i + 1, out = (n < from || n > to);
-      return '<div class="cs-line' + (out ? ' out' : '') + '" data-ln="' + n + '"><span class="n">' + n +
+      const n = i + 1;
+      return '<div class="cs-line" data-ln="' + n + '"><span class="n">' + n +
         '</span><span class="t">' + csHl(ln, pane.dataset.lang) + '</span></div>';
     }).join('');
     pane.addEventListener('click', e => {
