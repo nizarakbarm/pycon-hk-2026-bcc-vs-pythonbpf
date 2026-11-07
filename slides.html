@@ -895,16 +895,16 @@ def do_unlinkat_entry(ctx: struct_pt_regs) -> c_int64:
 </section>
 
 <!-- ================= 33 · WHAT TO CHOOSE ================= -->
-<section class="slide" data-art="content" data-single data-notes="<p>The choice, from the October numbers only. Python-BPF wins startup, per-event CPU, syscalls per event and memory. BCC wins one thing today: a struct as a map value compiles in BCC and fails in Python-BPF.</p><p>Then the boundary, and be precise. It is not that BCC denies and Python-BPF cannot: neither denies. BCC has bpf_send_signal, so enforcement can be raised from the kernel program instead of a userspace loop after a trace_pipe read. A hop removed, not a verdict. A seccomp filter runs before the syscall, which is why it can deny where neither library can.</p><p>End on the question, then stop talking and let the room answer. That is the handover to Q&A, and the best answers come from people running these frameworks on workloads we have not tried.</p>">
+<section class="slide" data-art="content" data-single data-notes="<p>The choice, from the October numbers only. Python-BPF wins startup, per-event CPU, syscalls per event and memory. BCC wins one thing today: a struct as a map value compiles in BCC and fails in Python-BPF.</p><p>Then the boundary, and be precise. A kprobe has no verdict. bpf_send_signal does not deny: it queues a signal that fires after the syscall returns. So BCC removes a userspace hop, not the ordering. Python-BPF cannot deny at all. BCC can, but not from a kprobe: bcc 0.36 has support_lsm and attach_lsm, and an LSM hook that returns -EPERM denies before the side effect. Confirm this on the box before you promise it: bcc.BPF.support_lsm() is True on vmnono, kernel 6.12. A seccomp filter also runs before the call, and it is not eBPF.</p><p>End on the question, then stop talking and let the room answer. That is the handover to Q&A, and the best answers come from people running these frameworks on workloads we have not tried.</p>">
   <div class="hdr"><span class="eyebrow">Result</span><span class="who">pick by job, not by speed</span></div>
   <div class="body">
     <div class="grid2">
       <div class="card" style="border-top:5px solid var(--accent)"><div class="tag" style="color:var(--accent);border-color:var(--accent)">Pick Python-BPF</div>
         <p style="color:var(--fg);font-size:19px;margin-top:10px;line-height:1.55">startup <b class="mono">0.02 s</b><br>CPU at 2M <b class="mono">1.30× lower</b><br>syscalls <b class="mono">1.03 / event</b><br>memory <b class="mono">22 MB</b></p></div>
       <div class="card" style="border-top:5px solid var(--red)"><div class="tag" style="color:var(--red);border-color:var(--red)">Pick BCC</div>
-        <p style="color:var(--fg);font-size:19px;margin-top:10px;line-height:1.55">a struct as a map value <b>works today</b><br><span class="muted">plus the in-kernel signal path</span></p></div>
+        <p style="color:var(--fg);font-size:19px;margin-top:10px;line-height:1.55">a struct as a map value <b>works today</b><br><span class="muted">plus in-kernel signal and BPF-LSM deny</span></p></div>
     </div>
-    <p class="callout">Boundary: <b>neither</b> can deny a syscall in the kernel. A seccomp filter acts before the call.</p>
+    <p class="callout">Boundary: a kprobe has <b>no verdict</b>. <span class="mono">bpf_send_signal</span> queues a signal; it fires after the syscall returns. Deny needs a pre-call hook: seccomp, or BPF-LSM — <span class="mono">attach_lsm</span> exists in BCC, Python-BPF has none.</p>
   </div>
   <div class="foot"><span class="muted">October numbers only · both frameworks run the same program.</span></div>
 </section>
