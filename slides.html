@@ -788,32 +788,32 @@ libstdc++.so.6         libm.so.6         libgcc_s.so.1  libc.so.6</span></pre>
 <section class="slide" data-art="content" data-notes="<p>The cause, measured: two sections with the same context annotation get ONE DILocalVariable debug node. llvmlite caches debug nodes by their operands, so equal operands return the same object. Python-BPF then adds a scope operand to that node, so the node points to its own subprogram and the subprogram points back through retainedNodes.</p><p>The crash: a hash of that node walks the ring. Module.add_debug_info needs a hash to look up its cache, so the lookup itself recurses. RecursionError raised inside llvmlite __hash__, reached from function_debug_info.py line 73.</p><p>What we believed first, and why it was wrong: the earlier note blamed union members inside struct_pt_regs. Unions only emit warnings. Each union gets an empty composite node with no members, so no loop. Two sections is the real trigger. Say that out loud, it is a credibility beat.</p><p>Evidence: the same local variable object id appeared for do_unlinkat_entry and do_unlinkat_exit, and the cycle reads DILocalVariable#66 scope to DISubprogram#68 retainedNodes back to DILocalVariable#66. With sys.setrecursionlimit(30000) the error is the same, so it is a loop, not a deep tree.</p><p>Why is_distinct does not help: it only writes the word distinct to the output. The cache key stays equal, so the node stays shared. Answer this before the room asks.</p><p>Fix: build the DILocalVariable outside the cache, one fresh object per function. After the fix, unlink_arg_return.py printed KPROBE ENTRY and KPROBE EXIT, 74 lines, no RecursionError. One section still works: 46 lines, no error.</p><p>Keep the workaround sentence short: until the node is built fresh, one section per file. Every GhostLock program holds a single section for this reason.</p>">
   <div class="hdr"><span class="eyebrow">Part 4 · limit 2</span><span class="who">one node, two functions</span></div>
   <div class="body">
-    <p class="lead">Two sections with the same context annotation share <b>one</b> <span class="mono">DILocalVariable</span> debug node. llvmlite merges equal nodes. Python-BPF then adds <span class="mono">scope</span> to that node.</p>
+    <p class="lead">Two sections annotate <span class="mono">ctx: struct_pt_regs</span>. The annotations are equal. llvmlite caches metadata by value. Both functions then get one <span class="mono">DILocalVariable</span> node, and Python-BPF adds <span class="mono">scope</span> to it.</p>
     <div class="codepair" style="align-items:start">
       <div>
         <table style="font-size:15px">
-          <tr><th>debug node</th><th>shared by cache</th><th>cycle</th></tr>
+          <tr><th>debug node</th><th>shared by cache</th><th>loop</th></tr>
           <tr><td class="mono">DIDerivedType</td><td>yes</td><td class="good">no</td></tr>
           <tr><td class="mono">DISubroutineType</td><td>yes</td><td class="good">no</td></tr>
           <tr><td class="mono">DILocalVariable</td><td class="warn">yes</td><td class="warn">yes</td></tr>
           <tr><td class="mono">DISubprogram</td><td class="good">no, name differs</td><td class="warn">holds the loop</td></tr>
         </table>
-        <p class="muted" style="font-size:14px;line-height:1.4;margin-top:6px">Entry reads <span class="mono">ctx.di</span>, <span class="mono">ctx.si</span>. Exit reads <span class="mono">ctx.ax</span>. Both annotate <span class="mono">ctx: struct_pt_regs</span>, so both hit one node.</p>
+        <p class="muted" style="font-size:14px;line-height:1.4;margin-top:6px">Entry reads <span class="mono">ctx.di</span> and <span class="mono">ctx.si</span>. Exit reads <span class="mono">ctx.ax</span>. Both sections annotate the same type. Equal type, equal node.</p>
       </div>
       <div>
         <!-- Mermaid source, rendered by Pele 1.13.0 to images/limit2-node-loop.svg:
              flowchart LR
                A["fn A kprobe&lt;br/&gt;ctx.di, ctx.si"] --&gt; N
                B["fn B kretprobe&lt;br/&gt;ctx.ax"] --&gt; N
-               N["DILocalVariable&lt;br/&gt;one object, both functions"] -- scope --&gt; S["DISubprogram&lt;br/&gt;retainedNodes"]
-               S -. back reference .-&gt; N
-             Regenerate with /tmp/pele-render/render2.mjs (bun render2.mjs). -->
-        <img class="pele-diagram" src="images/limit2-node-loop.svg" alt="Two sections, fn A kprobe and fn B kretprobe, both point at one DILocalVariable node. The node points to DISubprogram by scope. DISubprogram points back to the node by retainedNodes. The loop makes hashing recurse.">
+               N["DILocalVariable&lt;br/&gt;name: ctx&lt;br/&gt;one object for both"] -- "scope" --&gt; S["DISubprogram&lt;br/&gt;retainedNodes: ctx"]
+               S -. "hash(ctx) again" .-&gt; N
+             Regenerate with /tmp/pele-render/render3.mjs (bun render3.mjs). -->
+        <img class="pele-diagram" src="images/limit2-node-loop.svg" alt="Two sections, fn A kprobe and fn B kretprobe, both point at one DILocalVariable node named ctx. Python-BPF adds scope from that node to a DISubprogram. The DISubprogram holds the node again in retainedNodes. hash(ctx) walks this loop and never stops.">
       </div>
     </div>
-    <p class="callout rv"><span class="mono">RecursionError</span> in <span class="mono">Module.add_debug_info</span> to <span class="mono">hash(DILocalVariable)</span>. Fix: build the node outside the cache. Until then: <b>one section per file</b>.</p>
+    <p class="callout rv"><span class="mono">hash(ctx)</span> enters <span class="mono">DISubprogram</span> and comes back to <span class="mono">ctx</span>. The loop has no end, so Python raises <span class="mono">RecursionError</span>. Fix: build one node for each function. Until then: <b>one section per file</b>.</p>
   </div>
-  <div class="foot"><span class="muted">Measured on vmnono · Python-BPF 0.1.9, 2026-11-06 · the union warnings are a red herring.</span><span class="presswrap"><span class="press">press →</span></span></div>
+  <div class="foot"><span class="muted">Measured on vmnono · Python-BPF 0.1.9, 2026-11-06 · the union warnings are not the cause.</span><span class="presswrap"><span class="press">press →</span></span></div>
 </section>
 
 <!-- ================= 28 · LIMIT 3 KERNEL STRING ================= -->
