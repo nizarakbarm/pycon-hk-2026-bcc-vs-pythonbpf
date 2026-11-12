@@ -236,7 +236,23 @@ td.mono,td .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .osc button:disabled{opacity:.35;cursor:default}
 .osc button.exit{color:#ffd343}
 .osc [data-osc="page"]{font:600 12px/1 var(--mono);color:#93a4bb;padding:0 10px;white-space:nowrap}
-@media print{.osc,.overview{display:none!important}}
+@media print{.osc,.overview,.screenpick{display:none!important}}
+
+/* ---------- present-on-display picker ---------- */
+.screenpick{position:fixed;inset:0;z-index:60;display:grid;place-items:center;background:rgba(10,12,16,.9)}
+.screenpick[hidden]{display:none}
+.sp-inner{display:flex;flex-direction:column;gap:6px;min-width:340px;padding:18px;border-radius:10px;
+  background:#16202b;border:1px solid #35434f;box-shadow:0 10px 30px rgba(0,0,0,.5);
+  font-family:var(--sans);color:#dfe7ef}
+.sp-inner p{margin:0 0 6px;font:600 13px/1.4 var(--sans);color:#93a4bb;letter-spacing:.02em}
+.sp-inner button{font:600 13px/1.3 var(--sans);text-align:left;color:#dfe7ef;background:#1e2a36;
+  border:1px solid #35434f;border-radius:6px;padding:9px 12px;cursor:pointer}
+.sp-inner button:hover{background:#2b3a4d}
+.sp-inner button[data-cancel]{background:transparent;color:#93a4bb;border-color:transparent}
+.sp-hint{position:fixed;left:50%;bottom:64px;transform:translateX(-50%);z-index:61;max-width:720px;
+  padding:11px 16px;border-radius:8px;background:#2b1f14;border:1px solid #7a5a2e;color:#f3d9b0;
+  font:600 13px/1.45 var(--sans);box-shadow:0 8px 24px rgba(0,0,0,.55)}
+@media print{.sp-hint{display:none!important}}
 
 /* ---------- overview view (o) ---------- */
 .overview{position:fixed;inset:0;z-index:39;background:rgba(10,12,16,.96);display:none;
@@ -333,7 +349,7 @@ body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-orig
 <div class="stage">
 
 <!-- ================= 1 · TITLE ================= -->
-<section class="slide active" data-art="title" data-notes="<p>Welcome. Today we compare two Python eBPF frameworks — not just which is faster, but WHY. We measured every layer: startup syscalls, per-event CPU, memory, profiling, bytecode, JIT instructions. Both frameworks load a BPF program into the kernel — every performance difference lives in the userspace glue around it.</p>">
+<section class="slide active" data-art="title" data-notes="<p>Welcome. Two Python eBPF frameworks, one question: which is faster, and why. Same program, same tracepoint, same trigger. Every difference we find lives in the userspace glue — both load through the same kernel path.</p>">
   <div class="hdr"><span class="eyebrow">PyCon HK 2026</span><span class="muted">Hong Kong · 14–15 November 2026</span></div>
   <div class="body" style="justify-content:flex-start;padding:150px 0 0 204px">
     <div class="hero">
@@ -349,13 +365,13 @@ body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-orig
 </section>
 
 <!-- ================= 2 · ABOUT ================= -->
-<section class="slide" data-art="content" data-notes="<p>Quick intro. I'm a systems engineer at DomaiNesia — a hosting and cloud provider in Indonesia — building Python tooling for eBPF observability. My approach is data over assumptions, shaped by CTF reverse engineering. This talk is that approach applied to eBPF tooling.</p>">
+<section class="slide" data-art="content" data-notes="<p>I'm a systems engineer at DomaiNesia in Indonesia, building Python tooling for eBPF observability. The habit this talk comes from: measure every layer, trust no layer.</p>">
   <div class="hdr"><span class="eyebrow">About</span><span class="who">Nizar Akbar Meilani</span></div>
   <div class="body">
     <div class="grid3">
       <div class="card"><h3>Day job</h3><p>Systems engineer at <b>DomaiNesia</b> — hosting and cloud, Yogyakarta, Indonesia.</p></div>
       <div class="card"><h3>Focus</h3><p>eBPF <i>from Python</i> — kernel observability without writing C.</p></div>
-      <div class="card"><h3>Back at PyCon HK</h3><p>Third year running. Twice at APAC, once at PyCon ID.</p></div>
+      <div class="card"><h3>Talks so far</h3><p>PyCon HK 2025 and 2026 · PyCon APAC 2024 · PyCon ID ×2 · PyCon Taiwan 2026.</p></div>
     </div>
     <p class="sub">This talk is one habit from CTF work: <b>measure every layer, trust no layer</b>.</p>
   </div>
@@ -363,7 +379,7 @@ body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-orig
 </section>
 
 <!-- ================= 3 · THE FOUR QUESTIONS ================= -->
-<section class="slide" data-art="content" data-notes="<p class='say'>Every talk about two tools is really one question: which do I ship?</p><p>Mine has four parts — startup, per event, the waiting, and what you lose. I'll answer all four with numbers, then tell you the one that decides it.</p>">
+<section class="slide" data-art="content" data-notes="<p>One question, four parts: startup, per event, the wait, and what you lose. All four with numbers, then the one that decides a project.</p>">
   <div class="hdr"><span class="eyebrow">Today</span><span class="who">one question, four parts</span></div>
   <div class="body">
     <div class="route">
@@ -377,7 +393,7 @@ body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-orig
 </section>
 
 <!-- ================= 4 · ONE KERNEL, TWO TOOLS ================= -->
-<section class="slide" data-art="content" data-notes="<p>This is the frame for everything that follows. Two boxes: user space and kernel. Both tools sit in the first box, and both use one path in the second box: the same bpf() syscall, the same verifier, the same JIT compiler, the same hook, the same maps. The hook is a tracepoint because the workload is sys_enter_execve. Hold the shape: every measurement in this talk is taken in one of those two boxes, and once the kernel path is shared, any per-event difference has to come from user space. That is what the next slides measure, and it is why the deny gap later is a framework limit and not a kernel one.</p>">
+<section class="slide" data-art="content" data-notes="<p>Everything hangs on this drawing. Both tools sit in user space. Both reach the kernel through the same bpf() syscall, the same verifier, the same JIT, the same tracepoint, the same maps. So the kernel cannot explain a difference — per-event differences must come from user space. That is what the next slides measure, and why the deny gap later is a framework limit, not a kernel one.</p>">
   <div class="hdr"><span class="eyebrow">Context</span><span class="who">both tools, one kernel path</span></div>
   <div class="body" style="align-items:center">
     <svg viewBox="0 0 1120 300" style="width:100%;height:296px">
@@ -406,7 +422,7 @@ body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-orig
 </section>
 
 <!-- ================= 5 · HOW A PROGRAM BECOMES BYTECODE ================= -->
-<section class="slide" data-art="content" data-notes="<p>Two architectures, one destination. BCC embeds C strings inside Python, forks clang at runtime, and compiles against kernel headers. Python-BPF parses a decorated Python function into an AST, lowers it to llvmlite IR, and compiles with llc — all ahead of time. Both paths end at the same place: a BPF program loaded into the kernel. The node at the end is the point of the slide: both paths load a BPF program into the kernel. Do not claim the bytecode is identical.</p>">
+<section class="slide" data-art="content" data-notes="<p>Two architectures, one destination. BCC embeds C strings, forks clang at runtime, compiles against kernel headers. Python-BPF parses a decorated function into an AST, lowers it to llvmlite IR, compiles with llc — all ahead of time. Both end at a BPF program loaded into the kernel. Do not claim the bytecode is identical: the path is shared, the output is not.</p>">
   <div class="hdr"><span class="eyebrow">The one difference</span><span class="who">how a program becomes bytecode</span></div>
   <div class="body">
     <svg viewBox="0 0 1120 262" style="width:100%;height:258px">
@@ -451,7 +467,7 @@ body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-orig
 </section>
 
 <!-- ================= 7 · WHAT WE RUN ================= -->
-<section class="slide" data-art="content" data-notes="<p>One workload for the talk: sys_enter_execve, driven by 2M fork-plus-execve pairs, on the map_1_perf_timed_count program - a HashMap counter plus a perf event. The trigger is sequential: fork, wait for the child, then fork again. That is why one event costs 0.7-0.9 ms and 2M events take 25-30 minutes. The host is vmnono with three CPUs. Both frameworks run the same program, so any difference belongs to the framework, not the program.</p>">
+<section class="slide" data-art="content" data-notes="<p>One workload: sys_enter_execve, driven by 2M fork-plus-execve pairs, on map_1_perf_timed_count — a HashMap counter plus a perf event. The trigger is sequential: fork, wait for the child, fork again. That is why one event costs 0.7-0.9 ms and 2M take 25-30 minutes. Host vmnono, three CPUs. Same program on both sides, so any difference belongs to the framework.</p>">
   <div class="hdr"><span class="eyebrow">Setup</span><span class="who">one workload, held constant</span></div>
   <div class="body">
     <table>
@@ -467,7 +483,7 @@ body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-orig
 </section>
 
 <!-- ================= 7b · THE PROGRAM WE MEASURE (code stage) ================= -->
-<section class="slide" data-art="content" data-single data-notes="<p>Everything above, side by side, and read the last row carefully because the two are closer than they look.</p><p>Python-BPF does NOT have its own userspace read loop. It calls the same open_perf_buffer shape and then perf.poll(), which reaches libbpf perf_buffer__poll. So the API is the same and the poll is the same idea. What differs is underneath: BCC implements the wait itself, libbpf uses an epoll set. That is the perf fd slide, where strace shows poll against epoll_wait.</p><p>Do not say Python-BPF has a different polling API. It does not. Same call, different implementation underneath.</p><p>Keep this table in mind — the rest of the talk is measuring what those spelling differences cost at two million events, and where they cost nothing at all.</p>">
+<section class="slide" data-art="content" data-single data-notes="<p>Read the last row carefully: the two are closer than they look. Python-BPF has no read loop of its own — it calls the same open_perf_buffer shape and perf.poll(), which reaches libbpf's perf_buffer__poll. Underneath, BCC implements the wait itself; libbpf uses an epoll set. That is the fd slide: strace shows poll against epoll_wait. Do not say the polling API differs. It does not.</p>">
   <div class="hdr"><span class="eyebrow">Setup · the program</span><span class="who">both frameworks, whole files</span></div>
   <div class="body">
     <div class="cs" tabindex="0">
@@ -481,7 +497,7 @@ body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-orig
 </section>
 
 <!-- ================= 8 · STARTUP NUMBERS ================= -->
-<section class="slide" data-art="content" data-single data-notes="<p>The test data. BCC needs 0.4 s to start. Python-BPF needs 0.02 s. That is the start-time difference the two waits cover. The two rows below are the mechanism. BCC compiles the C in its own process, so it shows no child. Python-BPF forks one child, the llc compiler. At init BCC reads 20,768 blocks of kernel headers. Python-BPF reads 160. Ranges: BCC 0.375-0.580 s, Python-BPF 0.020-0.027 s.</p>">
+<section class="slide" data-art="content" data-single data-notes="<p>BCC needs 0.4 s to start, Python-BPF 0.02 s. The two rows below are the mechanism: BCC compiles C in its own process and reads 20,768 blocks of kernel headers; Python-BPF forks one llc child and reads 160 blocks. Ranges: 0.375-0.580 s against 0.020-0.027 s.</p>">
   <div class="hdr"><span class="eyebrow">Part 1 · startup</span><span class="who">init CPU, seconds</span></div>
   <div class="body">
     <div class="rows">
@@ -494,7 +510,7 @@ body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-orig
 </section>
 
 <!-- ================= 9 · STARTUP WHY ================= -->
-<section class="slide" data-art="content" data-notes="<p class='say'>Why? The work moved earlier.</p><p><span class='cue'>Reveal 1:</span> BCC forks clang in its own process, so it shows no child. Python-BPF forks one child, llc, and that child exits — that's where its compile time goes.</p><p><span class='cue'>Reveal 2:</span> at init BCC reads 20,768 blocks of kernel headers. Python-BPF reads 160.</p><p class='warn'>So the startup number is a trade, not a free win: compile once ahead of time, or compile every launch.</p>">
+<section class="slide" data-art="content" data-notes="<p class='say'>Why? The work moved earlier.</p><p>BCC forks clang in its own process and pays for it there; Python-BPF's single llc child exits after compiling. And at init BCC reads 20,768 blocks of kernel headers against 160. So startup is a trade, not a free win: compile once ahead of time, or compile every launch.</p>">
   <div class="hdr"><span class="eyebrow">Part 1 · startup</span><span class="who">where the 0.45 s goes</span></div>
   <div class="body">
     <table>
@@ -516,7 +532,7 @@ body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-orig
 </section>
 
 <!-- ================= 11 · CALLBACK VARIANTS ================= -->
-<section class="slide" data-art="content" data-notes="<p>Source: passes 1-3. Three callback variants of the same program. count prints one line, empty does nothing, print prints a constant. Only the callback changes between them.</p>">
+<section class="slide" data-art="content" data-notes="<p>Three callback variants of the same program. count prints one line, A does nothing, B prints a constant. Only the callback body changes, so any difference is the callback path.</p>">
   <div class="hdr"><span class="eyebrow">Part 2 · method</span><span class="who">same program, only the callback changes</span></div>
   <div class="body">
     <div class="rows">
@@ -530,7 +546,7 @@ body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-orig
 </section>
 
 <!-- ================= 12 · DELIVERY CONTROL ================= -->
-<section class="slide" data-art="content" data-notes="<p>Source: 10-08, 10-10. All six 2M arms in results/unprofiled. The trigger sends N = 2,000,000, and both frameworks delivered every one, so nothing was lost and no arm printed LOST.</p><p>Watch the number. The log line reads 2000001, but that is the summary formula, not an event: both programs print sum(v + 1) per map entry, so the reported total is one above the counter. The map held 2,000,000. Say 2,000,000 on stage.</p><p>The harness warns and quarantines an arm that falls short of the trigger. Delivery is equal, so CPU is the only open question.</p>">
+<section class="slide" data-art="content" data-notes="<p>All six 2M arms are in results/unprofiled. The trigger sent 2,000,000 and both frameworks delivered every one — no LOST line, no shortfall. The log reads 2000001 because both programs print sum(v + 1) per entry; the map held 2,000,000. Say 2,000,000 on stage. Delivery is equal, so CPU is the only open question.</p>">
   <div class="hdr"><span class="eyebrow">Part 2 · control</span><span class="who">nothing was lost</span></div>
   <div class="body">
     <div class="grid2">
@@ -543,7 +559,7 @@ body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-orig
 </section>
 
 <!-- ================= 13 · CPU AT SMALL N ================= -->
-<section class="slide" data-art="content" data-notes="<p>Two bars per N: BCC in the warm colour, Python-BPF in the cool one. The table gives the seconds and the ratio.</p><p>The bars at 1000 and 2000 are short against 2M, and that is real. Both frameworks are dominated by startup there. At 2M that startup has amortised, which is why these are per-event costs.</p><p>If someone asks about N equal to 100, we dropped it: its ratio was 7.38, the highest of all, because at 100 events BCC's runtime compile is 83 percent of its total. Keeping it would flatten the other bars.</p>">
+<section class="slide" data-art="content" data-notes="<p>Two bars per N: BCC warm, Python-BPF cool. The 1000 and 2000 bars are short against 2M, and that is real — startup dominates there. At 2M it has amortised, which is why that pair is per-event cost. We dropped N=100: ratio 7.38, because runtime compile was 83 percent of BCC's total.</p>">
   <div class="hdr"><span class="eyebrow">Part 2 · result</span><span class="who">total CPU at small N</span></div>
   <div class="body">
         <div class="bars">
@@ -562,7 +578,7 @@ body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-orig
 </section>
 
 <!-- ================= 14 · CPU AT 2M ================= -->
-<section class="slide" data-art="content" data-notes="<p>Read the 2M pair: BCC 134.568 seconds, Python-BPF 103.658. That is the result this talk rests on.</p><p>Data: results/unprofiled, count variant, [TIMING] Total CPU. CPU numbers, not wall.</p>">
+<section class="slide" data-art="content" data-notes="<p>Read the 2M pair: BCC 134.568 seconds, Python-BPF 103.658. Data: results/unprofiled, count variant, [TIMING] Total CPU. CPU, not wall.</p>">
   <div class="hdr"><span class="eyebrow">Part 2 · result</span><span class="who">total CPU at 2M events</span></div>
   <div class="body">
     <svg viewBox="0 0 1120 330" style="width:100%;height:320px">
@@ -601,7 +617,7 @@ body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-orig
 </section>
 
 <!-- ================= 15 · EMPTY CALLBACK ================= -->
-<section class="slide" data-art="content" data-single data-notes="<p>Data: results/unprofiled, 2M, abl_A_empty arm. The callback body is a bare pass. It prints nothing and reads no field. BCC still uses 103.3 s against Python-BPF's 84.0 s, a 19.2 s gap and a 1.23 ratio. Nothing in the callback can explain that gap, so the cost is in how each framework makes the call, not in what the callback does. That is the floor of the difference.</p>">
+<section class="slide" data-art="content" data-single data-notes="<p>2M, abl_A_empty arm: callback body a bare pass, no print, no field read. BCC 103.3 s against 84.0 s — a 19.2 s gap, 1.23 ratio. Nothing in the callback explains that, so the cost is in how each framework makes the call. This is the floor of the difference.</p>">
   <div class="hdr"><span class="eyebrow">Part 2 · control</span><span class="who">callback body = <span class="mono">pass</span></span></div>
   <div class="body">
     <div class="rows">
@@ -615,7 +631,7 @@ body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-orig
 </section>
 
 <!-- ================= 16 · WHERE THE CPU GOES ================= -->
-<section class="slide" data-art="content" data-notes="<p>Data: results/perfrecord, 2M count arm, folded stacks summed by PMU cycles, frame matched anywhere on the stack. BCC carries the ctypes and libffi bridge on 84.0 percent of sampled cycles. Python-BPF carries it on zero percent, and its own binding pybind11 on 92.6 percent. clang is on 0.4 percent of BCC stacks, its runtime compile, and zero on Python-BPF. The same three names hold in the other arms: ctypes on 70.8 and 75.3 percent for BCC, pybind11 on 89.3 and 91.2 percent for Python-BPF. Percentages compare only within this pass. The measure is presence on the stack, not leaf time.</p><p>ATTRIBUTION, measured 2026-10-18. The libffi frame does NOT mean libbcc links libffi. libbcc has no libffi dependency at all:</p><p>  readelf -d /usr/lib64/libbcc.so.0.36.0 | grep NEEDED<br>    libclang-cpp.so.21.1, libLLVM.so.21.1, libelf.so.1,<br>    libbpf.so.1, libstdc++.so.6, libm.so.6, libgcc_s.so.1, libc.so.6<br>  grep -i ffi over the whole transitive closure -> empty.</p><p>libffi enters along a SEPARATE branch of the same Python process:</p><p>  python3<br>    +- bcc/__init__.py:17   import ctypes as ct<br>    |    +- _ctypes.cpython-313-x86_64-linux-gnu.so<br>    |         +- libffi.so.8          <-- enters here<br>    +- bcc/libbcc.py        ctypes.CDLL(&quot;libbcc.so.0&quot;)<br>         +- libbcc.so.0 -> libbpf.so.1</p><p>Evidence: ldd on the _ctypes .so shows libffi.so.8; ldd on libbcc.so shows no ffi. Two branches off CPython with no edge between them, which is why libffi is heavy in a process strace while absent from linkage.</p><p>State it that way: the libffi cost is IMPORT cost, not eBPF cost. It is paid by `import ctypes` at bcc/__init__.py line 17, before any BPF program exists. Same class as the libclang-cpp and libLLVM mmap cost, which is the larger part of the same trace.</p><p>Do NOT claim libffi is why the trace is large overall. libclang-cpp and libLLVM dominate it. The frame belongs on this slide as a cost, but it is not a libbcc dependency and it is not the bulk.</p>">
+<section class="slide" data-art="content" data-notes="<p>results/perfrecord, 2M count arm, folded stacks summed by PMU cycles, frame matched anywhere on the stack. BCC carries ctypes and libffi on 84.0 percent of sampled cycles; Python-BPF carries it on zero and its own binding pybind11 on 92.6 percent. clang is on 0.4 percent of BCC stacks, zero on Python-BPF. The same names hold in the other arms: 70.8 and 75.3; 89.3 and 91.2. Percentages compare only inside this pass, and the measure is presence on the stack, not leaf time.</p><p>The libffi frame does not mean libbcc links libffi. It does not — the next two slides are the attribution.</p>
   <div class="hdr"><span class="eyebrow">Part 2 · attribution</span><span class="who">perf record, 2M count arm</span></div>
   <div class="body">
         <div class="bars">
@@ -629,7 +645,7 @@ body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-orig
 </section>
 
 <!-- ================= 17 · ASK: libffi DEPENDENCY? ================= -->
-<section class="slide" data-art="content" data-notes="<p class='say'>Pause here, because this is where I got it wrong the first time.</p><p class='cue'>Ask the room: that says ctypes and libffi on 84% of BCC's cycles. So — does libbcc depend on libffi?</p><p class='warn'>Wait. Let them answer. Then press.</p><p class='say'>It does not. libbcc has no libffi dependency at all. That frame is real, but it is not an eBPF cost.</p>">
+<section class="slide" data-art="content" data-notes="<p class='say'>Pause here — this is where I got it wrong the first time.</p><p class='cue'>Ask the room: that says ctypes and libffi on 84% of BCC's cycles — so does libbcc depend on libffi?</p><p class='warn'>Wait. Let them answer. Then press.</p><p class='say'>It does not. libbcc has no libffi dependency at all. That frame is real, but it is not an eBPF cost.</p>">
   <div class="hdr"><span class="eyebrow">Ask the room</span><span class="who">the pause you'll reuse at the limits</span></div>
   <div class="body ask">
     <p class="q">84% of BCC's cycles sit in <span class="mono">ctypes + libffi</span>.<br>So does <span class="bcc">libbcc</span> depend on <span class="mono">libffi</span>?</p>
@@ -643,7 +659,7 @@ body[data-view="presenter"] .stage{position:absolute;left:0;top:0;transform-orig
 </section>
 
 <!-- ================= 18 · libffi IS IMPORT COST ================= -->
-<section class="slide" data-art="content" data-single data-notes="<p>The 84.0 percent ctypes and libffi frame on the previous slide must not be misread as libbcc depending on libffi. It does not.</p><p>Measured 2026-10-18. readelf -d on libbcc.so.0.36.0 lists eight NEEDED entries and not one is an ffi library: libclang-cpp.so.21.1, libLLVM.so.21.1, libelf.so.1, libbpf.so.1, libstdc++.so.6, libm.so.6, libgcc_s.so.1, libc.so.6. A grep for ffi across the whole transitive closure comes back empty.</p><p>libffi arrives by a different route, in the same process. CPython imports ctypes at bcc/__init__.py line 17 (the file reads `import ctypes as ct`), and the _ctypes extension module links libffi.so.8 directly. Separately, bcc/libbcc.py does ctypes.CDLL(&quot;libbcc.so.0&quot;), which pulls libbcc and through it libbpf. So the process has two branches: one that brings libffi for ctypes itself, one that brings the eBPF loader stack. There is no edge between them, which is exactly why libffi is heavy in a process strace while absent from any library linkage.</p><p>The consequences, and say them in this order.<br>First, the libffi cost is IMPORT cost, not eBPF cost. It is paid by `import ctypes` before any BPF program exists. Same class of cost as the libclang-cpp and libLLVM mapping, which is the larger part of the same trace.<br>Second, do NOT claim libffi is why the trace is large overall. libclang-cpp and libLLVM dominate it.<br>Third, the frame still belongs on the previous slide as a real cost of the BCC path in Python. It is just not a libbcc dependency.</p><p>Evidence commands, if asked: readelf -d /usr/lib64/libbcc.so.0.36.0 | grep NEEDED ; readelf -d on the _ctypes .so shows NEEDED libffi.so.8.</p>">
+<section class="slide" data-art="content" data-single data-notes="<p>Measured 2026-10-18. readelf -d on libbcc.so.0.36.0 lists eight NEEDED entries, none an ffi library, and ffi across the whole closure comes back empty. libffi arrives by another route: CPython imports ctypes at bcc/__init__.py:17, and _ctypes links libffi.so.8; separately libbcc.py loads libbcc through ctypes. Two branches, no edge between them. So the cost is import cost, paid before any BPF program exists — same class as the libclang-cpp and libLLVM mapping, which dominates the trace. Do not say libffi is why the trace is large.</p>">
   <div class="hdr"><span class="eyebrow">Part 2 · correction</span><span class="who">libffi is import cost, not eBPF cost</span></div>
   <div class="body" style="gap:12px">
     <div class="codehead"><span class="tag">01</span><span class="mono">readelf -d libbcc.so.0.36.0 | grep NEEDED</span><b style="color:var(--good)">— no ffi anywhere</b></div>
@@ -668,7 +684,7 @@ libstdc++.so.6         libm.so.6         libgcc_s.so.1  libc.so.6</span></pre>
 </section>
 
 <!-- ================= 20 · ASK: SAME FDS? ================= -->
-<section class="slide" data-art="content" data-notes="<p class='say'>BCC's loop is perf_buffer_poll. Python-BPF's is perf.poll. Different names.</p><p class='cue'>Ask the room: same program, same tracepoint — are these two waiting on the same thing?</p><p>Wait for a show of hands. Most rooms say no, because the names differ. Then press.</p>">
+<section class="slide" data-art="content" data-notes="<p class='say'>BCC's loop is perf_buffer_poll. Python-BPF's is perf.poll. Different names.</p><p class='cue'>Ask the room: same program, same tracepoint — are these two waiting on the same thing?</p><p>Most rooms say no, because the names differ. Then press.</p>">
   <div class="hdr"><span class="eyebrow">Ask the room</span><span class="who">before the syscall trace</span></div>
   <div class="body ask">
     <p class="q"><span class="mono" style="font-size:34px">b.perf_buffer_poll(1)</span> &nbsp;vs&nbsp; <span class="mono" style="font-size:34px">perf.poll(1)</span><br>Are they waiting on the same thing?</p>
@@ -682,7 +698,7 @@ libstdc++.so.6         libm.so.6         libgcc_s.so.1  libc.so.6</span></pre>
 </section>
 
 <!-- ================= 21 · SYSCALLS PER EVENT ================= -->
-<section class="slide" data-art="content" data-notes="<p>Lead with gettid, because it is the one real per-event cost. BCC calls gettid 1,907,735 times, close to once per event. Python-BPF calls it 3 times, at startup only.</p><p>BUT BE CAREFUL WITH THE WORDING, and this is a correction made 2026-10-18. &quot;BCC calls gettid&quot; reads as a BCC framework property. It is not that, and it is not a strace artifact either. Say: BCC's per-event callback path costs a gettid per event, Python-BPF's does not. Where in that path the call comes from is not isolated.</p><p>What is established, each with its evidence.</p><p>1. It is per event, not an artifact of running under strace. gettid tracks N: 60 at N=100, 971 at N=1000, 1878 at N=2000, 1,907,735 at N=2M. A strace artifact would not scale 1:1 with the event count, and the ratio is the same at every size.</p><p>2. The pattern in steady state is poll, then gettid, then poll, strictly alternating, one gettid immediately after each poll that returned data. So the call sits in the callback dispatch, not in a timer.</p><p>3. It is NOT threading.get_ident(). Both programs contain the same per-event `if threading.get_ident() != main_ident` check, so blaming it was my first guess and it is wrong: 200,000 get_ident() calls in CPython 3.13 under strace -c produce 2 gettid calls. CPython caches the thread identity.</p><p>4. It is NOT import or load. `import bcc` plus `BPF(text=...)` under strace -c gives 0 gettid.</p><p>Still open: which call inside BCC's callback path issues it. The remaining candidate is the per-event event object construction, `b[&quot;events&quot;].event(data)`, which is BCC-specific ctypes work and runs once per event. Not proven. Do not assert it on stage; if asked, say the cause is in the callback path and not yet isolated.</p><p>One more thing worth knowing: the unprofiled pass cannot settle any of this. Its log is program stdout, not a syscall trace, so it contains no gettid line at all, present or absent. Only results/straceT carries syscalls.</p><p>Do not say Python-BPF polls once. That came from the wrong row of the rank file.</p><p>Both frameworks wait on the same three perf buffer fds with a 1 ms timeout, once per event; only the syscall name differs. The next slide proves that by tracing the fds.</p><p>The real eBPF syscalls are small and nearly equal: bpf 15 against 27, perf_event_open 4 against 4. Do not read the two million waits as eBPF activity.</p><p>Total calls: BCC 3,913,286 against Python-BPF 2,055,624, which is 1.96 against 1.03 calls per event. Python-BPF is lower even though it waits slightly more, because it does not pay a gettid per event.</p><p>Data: results/straceT, 2M count arm, strace -f -T unfiltered. Durations from this pass are not usable, because strace intercepts the syscall under study, so read counts only.</p>">
+<section class="slide" data-art="content" data-notes="<p>Lead with gettid, the one real per-event cost. BCC calls gettid 1,907,735 times; Python-BPF 3 times, at startup. Say it as BCC's callback path, not a framework property — and not a strace artifact: the count tracks N, 60 at 100 up to 1,907,735 at 2M, and steady state alternates poll, gettid, poll. It is not threading.get_ident(): CPython caches thread identity. Which call inside the callback issues it is still open; say so.</p><p>Both wait on the same three perf fds with a 1 ms timeout; only the name differs, and the next slide proves it by tracing fds. Real eBPF calls are small: bpf 15 against 27. Totals: 3,913,286 against 2,055,624 — 1.96 against 1.03 per event. Counts only: strace durations are unusable.</p>">
   <div class="hdr"><span class="eyebrow">Part 3 · syscalls</span><span class="who">per event, 2M</span></div>
   <div class="body">
     <div class="rows">
@@ -696,7 +712,7 @@ libstdc++.so.6         libm.so.6         libgcc_s.so.1  libc.so.6</span></pre>
 </section>
 
 <!-- ================= 22 · SAME TIMER ================= -->
-<section class="slide" data-art="content" data-notes="<p>The split matters, and it corrects what I said earlier. I claimed the loop wakes on its timer. Wrong: 95 percent of wakes carry data.</p><p>poll, BCC: 1,876,744 calls with data at 0.622 ms, 101,370 timeouts at 1.375 ms. Total 1305.694 s, from the rank file.<br>epoll_wait, Python-BPF: 1,927,731 with data at 0.675 ms, 109,831 timeouts at 1.373 ms. Total 1451.8 s.</p><p>The timeout means match to three digits, 1.375 against 1.373 ms, which is the strongest evidence that both sit on the same 1 ms timer. The trigger bursts and then goes quiet, so about 5 percent of wakes hit the empty timer and the rest return with data immediately.</p><p>1) Is there a time per syscall. Yes, strace -T recorded it. poll is 1305.694 s over 1,978,114 calls, 0.660 ms each. epoll_wait is 1451.765 s over 2,037,562 calls, 0.713 ms each. Both land on the 1 ms timeout, because both return 0 (Timeout). So the wait cost is the polling interval, not the framework.</p><p>2) What happens after poll or epoll_wait. Nothing framework-specific. Both are blocking waits in the userspace process; the kernel wakes the task when the timeout expires or a perf buffer has data. On wake the callback runs, then the loop waits again. The difference is below the API, not above it.</p><p>3) Why epoll_wait for Python-BPF and poll for BCC. The loader, not the language. Python-BPF goes through pylibbpf, which binds libbpf, and libbpf perf_buffer__poll registers the perf fds into an epoll set and calls epoll_wait. BCC does not use libbpf for this: it has its own loader (libbcc) and its own wait, a plain poll over the fd array. Same three fds, same 1 ms timeout, two implementations. Source: pylibbpf src/maps/perf_event_array.cpp calls perf_buffer__poll; BCC src/cc/api/BPFTable.cc:510 calls epoll_wait.</p><p>4) What connects libbpf, llvmlite and llc. Three stages, do not blur them. llvmlite builds IR from the decorated Python function; llc compiles that IR to a BPF object; libbpf then loads the object into the kernel and owns maps and the perf buffer at runtime. llvmlite and llc are build time and make the artifact; libbpf is runtime and consumes it. BCC has neither of the first two, since it compiles C at runtime, and its own loader replaces the third.</p><p>5) What happens after perf_buffer__poll returns. libbpf src/libbpf.c:11937. perf_buffer__poll is a thin wrapper: epoll_wait, then for each ready fd call perf_buffer__process_records, which walks the ring and hands each record to the callback we registered. No framework magic. BCC has the same shape with its own poll.</p><p>6) Does epoll beat a plain poll HERE. No, and say it plainly rather than implying otherwise. Per call: 0.622 against 0.675 ms with data, 1.375 against 1.373 ms on timeout. That 0.05 ms gap is noise, and the timeout figure is identical. The 2.9 percent difference is the CALL COUNT, not a slower syscall: 2,037,562 against 1,978,114. And the call count is wall time divided by the timeout, so Python-BPF simply ran 5 s longer, 1768.6 against 1763.6 s wall. Same trigger, same rate.</p><p>So where is the benefit. Only as the fd count grows. A plain poll passes the whole fd array every call and the kernel scans all N on return, so cost is O(N) per wait. epoll registers once through epoll_ctl, the kernel keeps the set, and epoll_wait returns only the ready entries, so cost is O(ready). At three perf fds that is the same work, which is exactly why the two means match. At hundreds of fds it is the difference between scanning hundreds and scanning the two that are ready. libbpf is a general loader and may watch many buffers, so it uses epoll for that reason, not for speed here.</p><p>Also note libbpf keeps both mechanisms in the same process: an epoll instance for the perf buffers, and a plain poll elsewhere. BCC contains an unused epoll_create1 it never registers anything with.</p><p>7) When there is no data, is the task idle. Yes, and say it precisely, because it explains the numbers above. The timeout is 1 ms and the call BLOCKS for it: the task sleeps and is woken by the timer or by data. The log proves it. Poll loop CPU is 103.638 s against 1768.550 s wall, about 6 percent. So 94 percent of the run is a sleeping task, not a spinning one. A 1 ms timeout is a scheduling interval, not a busy-wait, which is why two million waits cost 0.66 to 0.71 ms each instead of burning a core.</p><p>Still true: none of this is eBPF syscall work. bpf is 15 against 27, perf_event_open 4 against 4. The fds are the proof that both waits are the perf buffer.</p><p>Data: results/straceT, 2M count arm, strace -f -T unfiltered.</p><p>8) Why is epoll_wait's MEAN higher if epoll is supposed to be more effective. It is not slower, and epoll is not losing. Separate the two numbers that look like speed.</p><p>The timeout means are identical: 1.375 ms against 1.373 ms. That is the cleanest evidence available, because it is the syscall waiting the same 1 ms timer with nothing ready. At the syscall level the two cost the same.</p><p>The whole 2.9 percent TOTAL gap is call count: 2,037,562 against 1,978,114. Call count is wall divided by interval, and this arm ran 5 s longer (1768.6 against 1763.6), so it simply made more calls for the same 2M events.</p><p>The mean DATA case, 0.622 against 0.675 ms, is different for a second reason, and it is what each call FINDS rather than what the syscall costs. BCC returns with more fds ready per call: 28,922 double-ready and 1,032 triple, against 7,868 and 139. Its average call does more work and it returns less often.</p><p>Why would BCC batch more. Look at what BCC does between waits. It calls gettid 1,907,735 times, once per event, where Python-BPF calls it 3 times at startup. All that extra syscall work means BCC arrives back at poll later, by which time more perf fds have filled. So the batching is a consequence of BCC being busier in-process, not of poll being better.</p><p>Read the 1-ready share to see this: 98.4 percent for BCC, 99.6 percent for Python-BPF. Python-BPF mostly returns with exactly one fd ready, which is the efficient case. It consumes events promptly and comes back.</p><p>Where epoll would actually show its benefit: not here, and the slide says so. With three fds the two are equivalent by construction, poll being O(N) per wait and epoll_wait O(ready), with N equal to 3. The benefit needs N large, hundreds of fds, where poll must copy and scan the whole array every call while epoll returns only the ready entries. libbpf uses epoll because it is a general-purpose loader that may watch many buffers, not because it wins at three.</p><p>Also note neither framework optimised this path. BCC built an epoll instance with epoll_create1 and never registered anything in it, then polled anyway.</p>">
+<section class="slide" data-art="content" data-notes="<p>95 percent of wakes carry data, so the timer is not the story. poll: 1,876,744 calls with data at 0.622 ms, 101,370 timeouts at 1.375 ms. epoll_wait: 1,927,731 at 0.675 ms, 109,831 timeouts at 1.373 ms. The timeout means match to three digits — both sit on the same 1 ms timer. The 2.9 percent total gap is call count: this arm ran 5 s longer, 1768.6 against 1763.6 s wall.</p><p>Mean with data differs because BCC returns with more fds ready per call — 98.4 against 99.6 percent one-ready — because it is busier in-process. epoll wins only as fd count grows: poll is O(N), epoll_wait O(ready); at three fds they are equivalent. The task blocks, so 94 percent of the run sleeps. Still not eBPF work: bpf 15 against 27. Do not say Python-BPF polls once.</p>">
   <div class="hdr"><span class="eyebrow">Part 3 · the wait</span><span class="who">same timer, both frameworks</span></div>
   <div class="body">
     <div class="grid2">
@@ -710,7 +726,7 @@ libstdc++.so.6         libm.so.6         libgcc_s.so.1  libc.so.6</span></pre>
 </section>
 
 <!-- ================= 23 · WALL VS CPU ================= -->
-<section class="slide" data-art="content" data-notes="<p>Two findings on this slide. First the wall-versus-CPU gap. Second, one line that changed the result.</p><p>One line changed the result: Python-BPF flushed every print. Removing that cut its system time 39 percent. Total CPU fell 21 percent. Source: 10-08, a run outside the packaged tree; the six programs in results/ carry no flush=True and the dataset README records the removal for this reason.</p><p>Data: results/unprofiled, 2M count arm, [TIMING]. Wall is 1763.6 s for BCC and 1768.6 s for Python-BPF, a 5 s gap, 0.3 percent. CPU is 134.6 s against 103.7 s, a 30.9 s gap, 30 percent. The trigger is a sequential fork and wait loop, about 0.7 ms per event, so it runs for about 24 minutes and both frameworks sit behind it. Wall therefore measures the trigger, not the framework.</p>">
+<section class="slide" data-art="content" data-notes="<p>Wall is 1763.6 s for BCC and 1768.6 s for Python-BPF, a 0.3 percent gap; CPU is 134.6 against 103.7 s, 30 percent. The trigger is a sequential fork-and-wait loop at about 0.7 ms per event, so both frameworks sit behind it: wall measures the trigger. One line changed the result — Python-BPF flushed every print; removing it cut system time 39 percent and CPU 21 percent. The packaged programs carry no flush=True.</p>">
   <div class="hdr"><span class="eyebrow">Part 3 · method</span><span class="who">wall vs CPU</span></div>
   <div class="body">
     <div class="rows">
@@ -723,7 +739,7 @@ libstdc++.so.6         libm.so.6         libgcc_s.so.1  libc.so.6</span></pre>
 </section>
 
 <!-- ================= 24 · THREE TERMS, ONE NESTED ================= -->
-<section class="slide" data-art="content" data-notes="<p>Before any result, account for the measurement. Every term on the slide is from experiment/scripts/rebenc_unprof.sh, the arm function.</p><p>Read the formula left to right, in the order the runner executes it.</p><p>pre is the bash sleep after the program is launched, 2 s for BCC and 1 s for Python-BPF. Fixed by us, not measured.</p><p>Then the GATE: the runner does not fire on the fixed sleep alone. It polls the log for the program to report it is polling, sleeping 0.5 s per attempt, up to 120 attempts. That is why 0.5 appears as its own term, and why the real wait can be longer than pre if a program is slow to attach. The gate exists because a fixed pre-sleep can expire before attach under strace or perf, and the trigger's whole burst is then lost with no [LOST] line to warn you.</p><p>t_init is the framework's own startup, 0.45 s for BCC against 0.02 s for Python-PBF. That is the one number on this slide the frameworks control at start.</p><p>t_trigger is the trigger program, sudo -u TRIG_USER running the binary with N events. At 2M it is about 1400 seconds.</p><p>Do not ADD t_trigger to t_poll. They overlap, and the code says so plainly. The arm function backgrounds the program and then runs the trigger in the foreground:</p><p>  &quot;$py&quot; &quot;$prog&quot; > &quot;$log&quot; 2>&1 &     the program starts, its poll loop begins<br>  sleep &quot;$pre&quot;<br>  sudo -u &quot;$TRIG_USER&quot; &quot;$TRIG_BIN&quot; &quot;$N&quot;    the trigger runs on the same clock<br>  sleep &quot;$T&quot;                                drain, poll still running<br>  kill -INT &quot;$pid&quot;                          poll ends here</p><p>So the trigger runs WHILE the poll loop is already waiting, and every event the trigger causes is what poll is draining. The poll loop contains the trigger.</p><p>The numbers agree. BCC poll loop wall is 1763.010 s and Total wall is 1763.592 s, so the poll loop is 99.97 percent of the whole run; init and setup take 0.581 s between them. If t_trigger were a separate term at about 1400 s the sum would be roughly 3170 s, nearly double the 1763.6 s actually observed. That is the arithmetic proof that the terms are nested, not stacked.</p><p>What this means for the argument. wall is set by the trigger, and the poll loop is the program sitting behind it, so a wall difference between frameworks is a difference in how long each one waits, not in how much work it does. That is exactly why the deck quotes CPU.</p><p>Then teardown: SIGINT, then the runner waits in 0.5 s steps up to 20 s for the child to exit.</p><p>The point is that only two terms differ between the frameworks, t_init and t_poll, and both are inside the program. Every other term is identical by construction. So if wall differs between arms, it is not the harness.</p><p>Every number in this deck is CPU time, not wall time, because the trigger sets the pace.</p>">
+<section class="slide" data-art="content" data-notes="<p>Account for the measurement before any result. pre is our fixed sleep, 2 s for BCC and 1 s for Python-BPF. Then the gate: the runner polls the log until the program reports it is polling, so the real wait can exceed pre — a fixed sleep can expire before attach under strace and lose the burst with no LOST line. t_init is startup, the one part the framework controls: 0.45 s against 0.02 s. t_trigger is not added to t_poll: the trigger runs while the poll loop waits, so the poll loop contains it — BCC's poll loop is 99.97 percent of total wall. Only t_init and t_poll differ between frameworks, so a wall difference is how long each waits, not how much work it does.</p>">
   <div class="hdr"><span class="eyebrow">Part 3 · method</span><span class="who">three terms, one nested</span></div>
   <div class="body">
     <div class="fig">
@@ -737,7 +753,7 @@ libstdc++.so.6         libm.so.6         libgcc_s.so.1  libc.so.6</span></pre>
 </section>
 
 <!-- ================= 24b · HOW WE RUN ONE ARM (code stage) ================= -->
-<section class="slide" data-art="content" data-single data-notes="<p>Live. The runner: one arm at a time. It starts the program, sleeps a pre-wait for safety, then waits until the program reports that it is polling before it fires the trigger. That gate matters - a fixed pre-sleep can expire before attach and lose the trigger's whole burst with no LOST line. After the trigger it drains for T, then sends SIGINT and waits for the program to exit. The two arm calls at the end pass 2 s for BCC and 1 s for Python-BPF. This slide needs slidev dev; a static build shows a placeholder here.</p>">
+<section class="slide" data-art="content" data-single data-notes="<p>Live. One arm at a time: start the program, pre-wait, then wait until it reports polling before firing the trigger. The gate matters — a fixed sleep can expire before attach and lose the burst with no LOST line. After the trigger, drain for T, then SIGINT. The two arm calls pass 2 s for BCC and 1 s for Python-BPF.</p>">
   <div class="hdr"><span class="eyebrow">Part 3 · method in code</span><span class="who">one arm at a time</span></div>
   <div class="body">
     <div class="cs" tabindex="0">
@@ -755,7 +771,7 @@ libstdc++.so.6         libm.so.6         libgcc_s.so.1  libc.so.6</span></pre>
 </section>
 
 <!-- ================= 26 · LIMIT 1 ENFORCEMENT ================= -->
-<section class="slide" data-art="content" data-notes="<p>This slide now rests on two runs, not on a helper list. Both are in evidence.txt: the Python-BPF enforcer as section 3, the BCC one as section 5.</p><p>Python-BPF path: the kernel program prints, trace_pipe carries the line to userspace, and the process calls os.kill. Three steps, and the kill is a userspace action.</p><p>BCC path: bpf_send_signal raises the signal from inside the program. Measured today on vmnono with BCC 0.36.0: the trigger came back rc = -9, SIGKILL, with no userspace kill loop at all. Same probe point, kprobe/do_futex, same op set tagged 1/2/3.</p><p>The honest boundary, and say this before someone asks. Neither library DENIES a syscall. bpf_send_signal delivers on return from the probe, so do_futex has already run. The ordering limit is identical to the Python-BPF version; what BCC removes is the round-trip, not the ordering. A seccomp filter runs before the call, which is why it can deny where neither can.</p><p>Do not overclaim it as enforcement. It is a faster kill, not a block. The count is the honest measure of the gap: 18 helpers against 36.</p><p>Sources: evidence.txt sections 3 and 5; bcc/src/cc/export/helpers.h; pythonbpf/helper/.</p>">
+<section class="slide" data-art="content" data-notes="<p>Two runs, in evidence.txt: the Python-BPF enforcer is section 3, the BCC one section 5. Python-BPF prints, trace_pipe carries the line to userspace, and the process calls os.kill — three steps. BCC calls bpf_send_signal from inside the program: measured today on vmnono with BCC 0.36.0, the trigger returned rc = -9, SIGKILL, no userspace kill loop. Same kprobe, same tagged op set. The honest boundary: neither library denies a syscall — bpf_send_signal fires on return, so do_futex has already run. BCC removes the round-trip, not the ordering. seccomp runs before the call, which is why it can deny. Count is the gap: 18 helpers against 36.</p>">
   <div class="hdr"><span class="eyebrow">Part 4 · limit 1</span><span class="who">enforcement</span></div>
   <div class="body">
     <table style="font-size:20px">
@@ -771,7 +787,7 @@ libstdc++.so.6         libm.so.6         libgcc_s.so.1  libc.so.6</span></pre>
 </section>
 
 <!-- ================= 27a · THE ENFORCER (code stage) ================= -->
-<section class="slide" data-art="content" data-single data-notes="<p>Live. Open the BCC enforcer, then put ghostlock_enforce.py beside it to show the contrast.</p><p>What the file does: watches kprobe/do_futex, tags the op set, and on tag 3 calls bpf_send_signal(SIGKILL). That is the helper Python-BPF does not have.</p><p>The tags, because the log will not explain them. They are the GhostLock exploit sequence: tag 1 is FUTEX_LOCK_PI, the chain gets built; tag 2 is FUTEX_WAIT_REQUEUE_PI, the victim parks; tag 3 is FUTEX_CMP_REQUEUE_PI, the requeue that converts the victim's lock, which is the trigger. Tag 0 is everything else and is filtered out, so UNLOCK_PI never appears. Only tag 3 signals, and tags 1 and 2 share one pid: a single process walking the attack.</p><p>Measured on vmnono, BCC 0.36.0: the trigger comes back rc = -9, SIGKILL, raised inside the program. No trace_pipe read, no userspace kill loop. The Python-BPF enforcer needs both, because it has no such helper.</p><p>Say signalling, not killed. The kill leaves no line of its own: the task is gone before anything could print after it, so the program announces the decision before signalling and the exit status is the proof. The Python-BPF side can log ENFORCER KILLED after the fact, because userspace performs the kill there.</p><p>Still a kill, not a deny. bpf_send_signal delivers on return from the probe, so do_futex has already run. A seccomp filter runs before the call, which is why it can deny where neither library can.</p><p>Two build notes if asked: BCC cannot include linux/futex.h here (clang cannot emit mutex_init for BPF), and it cannot take a typed kprobe argument on this kernel, because BCC rewrites it to ctx->di and pt_regs is only forward-declared. The file carries a local pt_regs_x64 layout instead. Evidence section 5.</p><p>The ordering point still stands for both. Neither denies.</p>">
+<section class="slide" data-art="content" data-single data-notes="<p>Live. ghostlock_enforce_bcc.py watches kprobe/do_futex, tags the op set, and on tag 3 calls bpf_send_signal(SIGKILL) — the helper Python-BPF does not have. Tags are the GhostLock sequence: 1 LOCK_PI builds the chain, 2 WAIT_REQUEUE_PI parks the victim, 3 CMP_REQUEUE_PI is the trigger; 0 is filtered. An earlier readout blamed union members in struct_pt_regs — that only produced a warning. Say signalling, not killed, and still a kill, not a deny: do_futex has already run.</p>">
   <div class="hdr"><span class="eyebrow">Part 4 · limit 1 in code</span><span class="who">the helper Python-BPF does not have</span></div>
   <div class="body">
     <div class="cs" tabindex="0">
@@ -785,7 +801,7 @@ libstdc++.so.6         libm.so.6         libgcc_s.so.1  libc.so.6</span></pre>
 </section>
 
 <!-- ================= 27 · LIMIT 2 SECTIONS ================= -->
-<section class="slide" data-art="content" data-notes="<p>The cause, measured: two sections with the same context annotation get ONE DILocalVariable debug node. llvmlite caches debug nodes by their operands, so equal operands return the same object. Python-BPF then adds a scope operand to that node, so the node points to its own subprogram and the subprogram points back through retainedNodes.</p><p>The crash: a hash of that node walks the ring. Module.add_debug_info needs a hash to look up its cache, so the lookup itself recurses. RecursionError raised inside llvmlite __hash__, reached from function_debug_info.py line 73.</p><p>What we believed first, and why it was wrong: the earlier note blamed union members inside struct_pt_regs. Unions only emit warnings. Each union gets an empty composite node with no members, so no loop. Two sections is the real trigger. Say that out loud, it is a credibility beat.</p><p>Evidence: the same local variable object id appeared for do_unlinkat_entry and do_unlinkat_exit, and the cycle reads DILocalVariable#66 scope to DISubprogram#68 retainedNodes back to DILocalVariable#66. With sys.setrecursionlimit(30000) the error is the same, so it is a loop, not a deep tree.</p><p>Why is_distinct does not help: it only writes the word distinct to the output. The cache key stays equal, so the node stays shared. Answer this before the room asks.</p><p>Fix: build the DILocalVariable outside the cache, one fresh object per function. After the fix, unlink_arg_return.py printed KPROBE ENTRY and KPROBE EXIT, 74 lines, no RecursionError. One section still works: 46 lines, no error.</p><p>Keep the workaround sentence short: until the node is built fresh, one section per file. Every GhostLock program holds a single section for this reason.</p>">
+<section class="slide" data-art="content" data-notes="<p>Two sections with the same context annotation get one DILocalVariable debug node: llvmlite caches debug nodes by operands, Python-BPF then adds a scope operand, and the node points at its own subprogram. Module.add_debug_info hashes that node to look it up, so the lookup recurses — RecursionError inside llvmlite __hash__, reached from function_debug_info.py line 73. We first blamed union members in struct_pt_regs; unions only emit warnings. is_distinct does not help — only the word changes, the cache key stays equal. Fix: build the DILocalVariable outside the cache, one fresh object per function. After it, unlink_arg_return.py printed entry and exit, 74 lines, no error. Until then: one section per file.</p>">
   <div class="hdr"><span class="eyebrow">Part 4 · limit 2</span><span class="who">one node, two functions</span></div>
   <div class="body">
     <p class="lead">Two sections annotate <span class="mono">ctx: struct_pt_regs</span>. The annotations are equal. llvmlite caches metadata by value. Both functions then get one <span class="mono">DILocalVariable</span> node, and Python-BPF adds <span class="mono">scope</span> to it.</p>
@@ -817,7 +833,7 @@ libstdc++.so.6         libm.so.6         libgcc_s.so.1  libc.so.6</span></pre>
 </section>
 
 <!-- ================= 28 · LIMIT 3 KERNEL STRING ================= -->
-<section class="slide" data-art="content" data-notes="<p>Program: kprobe_unlink.py, @section(&quot;kprobe/do_unlinkat&quot;) — a kprobe on do_unlinkat, so ctx.di is dfd and ctx.si is arg 2, a struct filename*. Nothing here is a syscall tracepoint; the register pair is why arg 2 is si.</p><p>Ask the room: what does ctx.si hold here? A struct filename pointer, the second argument register.</p><p>The table is the three documented attempts, each with its real error. First row: cast to the vmlinux struct type and read its name field, probe_read reports Struct type not found, because vmlinux ctypes stubs are not registered in the compiler's struct symbol table. Second row: allocate a local @struct with a str(256) field and read into it, ValueError Variable 'buf' not found, because the struct constructor never registers the variable in the local symbol table. Third row: a c_uint64 buffer, which compiles and reads only 8 bytes, so a filename truncates.</p><p>Click 1: the only thing that works. probe_read with an 8 byte destination returns the struct's name pointer, 0xffff8f2d4705c000, which is a valid kernel address in the 0xffff8 range. So the helper works and the read succeeds.</p><p>Click 2: the correction, and the reason this slide used to be wrong. The title of the source note says &quot;returns garbage&quot;, and the note itself says that title is wrong. The value is a valid pointer. What is missing is the second dereference: probe_read leaves a loaded i64, and probe_read_str wants an i8* pointer, so the emitter would need to insert inttoptr. It does not, and that is the gap.</p><p>Source: &quot;Python-BPF Probe Read of ctx.si Returns Garbage&quot;, 2026-07-25, measured on Python-BPF 0.1.9. BCC does this in one C expression: (struct filename *)PT_REGS_PARM2(ctx) then fname->name, because clang emits the offset dereference for you.</p>">
+<section class="slide" data-art="content" data-notes="<p>kprobe_unlink.py, @section(&quot;kprobe/do_unlinkat&quot;): ctx.di is dfd, ctx.si is arg 2, a struct filename *. Ask the room what ctx.si holds. Three documented attempts and their real errors: cast to the vmlinux struct — probe_read reports Struct type not found; a local @struct with str(256) — ValueError Variable 'buf' not found; a c_uint64 buffer — compiles, reads 8 bytes, truncates the name. The working call: probe_read with an 8-byte destination returns the name pointer, 0xffff8f2d4705c000, a valid kernel address. So the read succeeds and the source note's title is wrong. What is missing is the second dereference: probe_read leaves an i64, probe_read_str wants an i8*, and the emitter inserts no inttoptr. BCC does it in one C expression.</p>
   <div class="hdr"><span class="eyebrow">Part 4 · limit 3</span><span class="who">reading a kernel string</span></div>
   <div class="body">
     <p class="lead"><b>Program:</b> <span class="mono">kprobe_unlink.py</span> — <span class="mono">@section("kprobe/do_unlinkat")</span>, a kprobe on <span class="mono">do_unlinkat</span>: <span class="mono">ctx.di</span> is <span class="mono">dfd</span>, <span class="mono">ctx.si</span> is arg 2, a <span class="mono">struct filename *</span>. Three attempts to read its name:</p>
@@ -849,7 +865,7 @@ def do_unlinkat_entry(ctx: struct_pt_regs) -> c_int64:
 </section>
 
 <!-- ================= 29 · LIMIT 4 CODEGEN ================= -->
-<section class="slide" data-art="content" data-single data-notes="<p>Source: 2026-05-11, last audited 2026-05-10, spoken here as a live limit. An array subscript falls to a bare return at expr_pass.py line 730, so no code is emitted for ctx.args[0]. The addition operator maps to a plain builder add at line 227, so count plus one compiles to load, add, store, with a race window between load and store. BCC emits a single atomicrmw with sequential consistency for the same line. So on many CPUs a Python-BPF map counter can lose updates. Both are compiler gaps, not design limits.</p>">
+<section class="slide" data-art="content" data-single data-notes="<p>Live limit, last audited 2026-05-10. An array subscript falls to a bare return at expr_pass.py line 730, so ctx.args[0] emits no code. The add operator is a plain builder add at line 227, so count plus one is load, add, store — a race window. BCC emits one atomicrmw with sequential consistency. On many CPUs a Python-BPF map counter can lose updates. Both are compiler gaps, not design limits.</p>">
   <div class="hdr"><span class="eyebrow">Part 4 · limit 4</span><span class="who">quiet codegen gaps</span></div>
   <div class="body">
     <table style="font-size:22px">
@@ -864,7 +880,7 @@ def do_unlinkat_entry(ctx: struct_pt_regs) -> c_int64:
 </section>
 
 <!-- ================= 30 · ASK: THE KERNEL OR THE FRAMEWORK ================= -->
-<section class="slide" data-art="content" data-notes="<p>Ask the room before advancing: a print with four values goes silent. Is that Python-BPF, or the kernel? Pause.</p><p>Click 1: reveal. It is the kernel, and both frameworks are subject to it. bpf_trace_printk takes three values after the format string, and the rule comes from the helper signature: fmt plus fmt_size plus three varargs is five, the eBPF helper argument cap. A framework that tried to print four would fail the verifier, so no framework lifts this. Source: the 2026-10-14 note &quot;BCC vs pythonbpf bpf_trace_printk maximum payload&quot;, and linux/bpf.h, which states the helper &quot;can take up to three additional u64 arguments (as an eBPF helpers, the total number of arguments is limited to five).&quot;</p><p>Click 2: the part that belongs in a talk about Python-BPF. The count is not the finding, the silence is. BCC fails at load with the BPF stack-limit error and the compiler names the fix. Python-BPF loads, attaches, drops the line, and says nothing at all. That is the difference worth saying out loud.</p><p>An earlier reading of this slide said a program with eight context fields, or five separate print statements, goes silent. That is evidence.txt section 4, measured while building the GhostLock tracker, and it does not separate two causes. The measured kernel rule is the four-value case, so state that and not the other.</p>">
+<section class="slide" data-art="content" data-notes="<p>Ask before advancing: a print with four values goes silent — Python-BPF, or the kernel? It is the kernel, and it binds both frameworks: bpf_trace_printk takes the format plus three varargs, the five-argument helper cap. Printing four would fail the verifier. The finding is not the count, it is the silence: BCC fails at load and names the stack-limit fix; Python-BPF loads, attaches, drops the line, says nothing. Earlier readings claimed eight context fields or five print statements — that does not separate the causes. State the four-value rule.</p>">
   <div class="hdr"><span class="eyebrow">Ask the room</span><span class="who">the silent case</span></div>
   <div class="body ask">
     <p class="q">One <span class="mono">print</span>, four values → <b>silent</b>.<br>Is that Python-BPF, or the kernel?</p>
@@ -879,7 +895,7 @@ def do_unlinkat_entry(ctx: struct_pt_regs) -> c_int64:
 </section>
 
 <!-- ================= 32 · VERDICT TABLE ================= -->
-<section class="slide" data-art="content" data-notes="<p>Data: results/unprofiled and results/straceT, 2M count arm. Startup CPU is 0.45 s against 0.02 s, because BCC forks clang and reads kernel headers at run time. Per-event CPU is 134.6 s against 103.7 s. Syscalls per event: BCC 3,913,286 over 2M events is 1.96; Python-BPF 2,055,624 over 2M is 1.03. Peak RSS is 175 MB against 22 MB, because clang is loaded in the BCC process while Python-BPF forks one child that exits.</p>">
+<section class="slide" data-art="content" data-notes="<p>Data: results/unprofiled and results/straceT, 2M count arm. Startup 0.45 s against 0.02 s. Per-event CPU 134.6 against 103.7 s. Syscalls per event 1.96 against 1.03 — 3,913,286 and 2,055,624 over 2M. Peak RSS 175 MB against 22 MB, clang loaded in the BCC process.</p>">
   <div class="hdr"><span class="eyebrow">Result</span><span class="who">2M events, count variant</span></div>
   <div class="body">
     <table style="font-size:20px">
@@ -895,7 +911,7 @@ def do_unlinkat_entry(ctx: struct_pt_regs) -> c_int64:
 </section>
 
 <!-- ================= 33 · WHAT TO CHOOSE ================= -->
-<section class="slide" data-art="content" data-single data-notes="<p>The choice, from the October numbers only. Python-BPF wins startup, per-event CPU, syscalls per event and memory. BCC wins one thing today: a struct as a map value compiles in BCC and fails in Python-BPF.</p><p>Then the boundary, and be precise. A kprobe has no verdict. bpf_send_signal does not deny: it queues a signal that fires after the syscall returns. So BCC removes a userspace hop, not the ordering. Python-BPF cannot deny at all. BCC can, but not from a kprobe: bcc 0.36 has support_lsm and attach_lsm, and an LSM hook that returns -EPERM denies before the side effect. Confirm this on the box before you promise it: bcc.BPF.support_lsm() is True on vmnono, kernel 6.12. A seccomp filter also runs before the call, and it is not eBPF. One more precision for the follow-up: for futex specifically, only seccomp can deny. The kernel has no futex LSM hook, so attach of lsm/futex fails with &quot;futex is not found in BTF&quot;. The denied set is futex op 6, 11, 12 plus the private-flag forms 134, 139, 140, and the filter reads the op at seccomp_data offset 24, not 16. Measured in ~/experiment/ghostlock/deny_paths.md; the BCC LSM demo there denies lsm/file_open to prove the verdict path exists.</p><p>End on the question, then stop talking and let the room answer. That is the handover to Q&A, and the best answers come from people running these frameworks on workloads we have not tried.</p>">
+<section class="slide" data-art="content" data-single data-notes="<p>From the October numbers only: Python-BPF wins startup, CPU, syscalls and memory. BCC wins one thing today — a struct as a map value compiles there and fails in Python-BPF.</p><p>Then the boundary. A kprobe has no verdict: bpf_send_signal fires after the syscall returns, so BCC removes a userspace hop, not the ordering. Python-BPF cannot deny at all. BCC can, but not from a kprobe: 0.36 has support_lsm and attach_lsm, and an LSM hook returning -EPERM denies before the side effect — support_lsm() is True on vmnono. seccomp runs before the call and is not eBPF. For futex, only seccomp: no futex LSM hook, so attach fails with &quot;futex is not found in BTF&quot;. Then let the room answer.</p>">
   <div class="hdr"><span class="eyebrow">Result</span><span class="who">pick by job, not by speed</span></div>
   <div class="body">
     <div class="grid2">
@@ -910,7 +926,7 @@ def do_unlinkat_entry(ctx: struct_pt_regs) -> c_int64:
 </section>
 
 <!-- ================= 34 · THE ROUTE BACK ================= -->
-<section class="slide" data-art="content" data-single data-notes="<p class='say'>Four questions, four answers. Startup: the work moved earlier. Per event: one bridge is cheaper. The wait: same timer, so it is not the story. And what you lose: enforcement is the one that decides a project.</p><p>If you remember one line: <b>the kernel is the same; the glue is the difference.</b> Everything we measured lives in the user space box we drew at the start.</p><p>Click any answer to jump back to its evidence.</p>">
+<section class="slide" data-art="content" data-single data-notes="<p class='say'>Four questions, four answers. Startup: the work moved earlier. Per event: one bridge is cheaper. The wait: same timer, not the story. What you lose: enforcement is what decides a project.</p><p>If you remember one line: <b>the kernel is the same; the glue is the difference.</b> Click any answer to jump to its evidence.</p>">
   <div class="hdr"><span class="eyebrow">Close</span><span class="who">the four answers</span></div>
   <div class="body">
     <div class="route">
@@ -925,7 +941,7 @@ def do_unlinkat_entry(ctx: struct_pt_regs) -> c_int64:
 </section>
 
 <!-- ================= 35 · Q&A ================= -->
-<section class="slide center" data-art="content" data-notes="<p>Thank you. Ten to fifteen minutes for questions. The dataset is in the talk repository: results/unprofiled, results/straceT and results/perfrecord, with a README that records how to read each pass. Happy to take questions on the methodology, the limitations, or the harness.</p>">
+<section class="slide center" data-art="content" data-notes="<p>Thank you. Five minutes for questions — we are inside a 30-minute slot. Dataset and harness are in the talk repository, with a README per pass. Happy to take methodology, limitations or harness questions.</p>">
   <p class="overline">PyCon HK 2026</p>
   <h1 style="font-size:76px;margin:8px 0 16px">Q&amp;A</h1>
   <p class="lead" style="max-width:960px">Slides and data → <b>github.com/nizarakbarm/pycon-hk-2026-bcc-vs-pythonbpf</b></p>
@@ -940,6 +956,7 @@ def do_unlinkat_entry(ctx: struct_pt_regs) -> c_int64:
   <button data-osc="next" title="Next slide">Next slide</button>
   <button data-osc="fullscreen" title="Toggle fullscreen (f)">Toggle fullscreen</button>
   <button data-osc="overview" title="Toggle overview view (o)">Toggle overview view</button>
+  <button data-osc="present" title="Present fullscreen on a chosen display">Present on display</button>
   <button data-osc="presenter" title="Open presenter view (p)">Open presenter view</button>
 </div>
 
@@ -1734,6 +1751,89 @@ function syncFullscreenBtn() {
 }
 document.addEventListener('fullscreenchange', syncFullscreenBtn);
 
+/* ---------- present fullscreen on a chosen display ---------- */
+function pickScreen(screens) {
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.className = 'screenpick';
+    const inner = document.createElement('div');
+    inner.className = 'sp-inner';
+    const q = document.createElement('p');
+    q.textContent = 'Present fullscreen on which display?';
+    inner.appendChild(q);
+    screens.forEach((s, k) => {
+      const b = document.createElement('button');
+      const bits = ['Display ' + (k + 1), s.width + '×' + s.height];
+      if (s.isPrimary) bits.push('primary');
+      if (s.label) bits.push(s.label);
+      b.textContent = bits.join(' · ');
+      b.addEventListener('click', () => { ov.remove(); resolve(s); });
+      inner.appendChild(b);
+    });
+    const cancel = document.createElement('button');
+    cancel.dataset.cancel = '';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', () => { ov.remove(); resolve(null); });
+    inner.appendChild(cancel);
+    ov.addEventListener('click', e => { if (e.target === ov) { ov.remove(); resolve(null); } });
+    addEventListener('keydown', function esc(e) {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      removeEventListener('keydown', esc, true);
+      ov.remove(); resolve(null);
+    }, true);
+    ov.appendChild(inner);
+    document.body.appendChild(ov);
+  });
+}
+
+function presentHint(text) {
+  const old = document.querySelector('.sp-hint');
+  if (old) old.remove();
+  const el = document.createElement('div');
+  el.className = 'sp-hint';
+  el.setAttribute('role', 'status');
+  el.textContent = text;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 7000);
+}
+
+async function presentOnScreen() {
+  const root = document.documentElement;
+  const plain = () => root.requestFullscreen().catch(() => {});
+  if (!('getScreenDetails' in window)) {
+    presentHint('This browser has no window-management API — presenting on the current display only.');
+    return plain();
+  }
+  let details;
+  try {
+    // Chrome never answers getScreenDetails() on file:// — the permission prompt cannot be
+    // shown for a file origin, so the promise stays pending forever.
+    details = await Promise.race([
+      window.getScreenDetails(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('window-management timeout')), 2000)),
+    ]);
+  } catch (e) {
+    presentHint(location.protocol === 'file:'
+      ? 'Second-screen presenting needs an http:// origin. Run `python3 -m http.server` in the deck folder and open http://localhost:8000/slides.html — then allow window management once.'
+      : 'Window management permission was not granted — allow it for this site, then click again.');
+    return plain();
+  }
+  const target = details.screens.length > 1 ? await pickScreen(details.screens) : details.screens[0];
+  if (!target) return;
+  if (document.fullscreenElement === root) await document.exitFullscreen().catch(() => {});
+  try { await root.requestFullscreen({ screen: target }); } catch (e) { return plain(); }
+  // Chrome on macOS accepts {screen} but can leave the view on the current display.
+  if (target !== details.currentScreen) {
+    setTimeout(() => {
+      if (document.fullscreenElement && target !== details.currentScreen) {
+        presentHint('Chrome stayed on ' + details.currentScreen.label + ' — drag this window to ' +
+          target.label + ' and it presents there. (Cross-display fullscreen is unsupported on this Chrome build.)');
+      }
+    }, 900);
+  }
+}
+
 /* ---------- overview view ---------- */
 let overviewOn = false;
 function buildOverview() {
@@ -1789,6 +1889,7 @@ if (osc) {
     if (kind === 'next') next();
     else if (kind === 'prev') prev();
     else if (kind === 'fullscreen') toggleFullscreen();
+    else if (kind === 'present') presentOnScreen();
     else if (kind === 'presenter') openPresenter();
     else if (kind === 'overview') toggleOverview();
   });
