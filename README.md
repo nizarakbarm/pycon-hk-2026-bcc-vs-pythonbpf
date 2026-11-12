@@ -31,7 +31,7 @@ the trigger is fork-bound and varies 8–16% between runs.
 slides.html                     the deck — fixed 1280x720 canvas, no build step, no CDN
 index.html                      redirect to slides.html
 images/                         deck art
-data/live-code/                 the six programs shown on the code slides
+data/live-code/                 the programs on the code slides, including both GhostLock enforcers
 data/raw/experiment/            host, scripts, trigger, programs   (see its README)
 data/raw/experiment/results/    NOT in the tree — download the release asset
 ```
@@ -39,6 +39,21 @@ data/raw/experiment/results/    NOT in the tree — download the release asset
 `data/raw/experiment/results/README.md` explains what each pass measured, the file formats,
 the delivery gate and the traps (strace timings are unusable; perf CPU is comparable only
 inside its own pass). Read it before quoting a number.
+
+## Limit 1 in code — two enforcers, same probe
+
+`data/live-code/ghostlock/` holds both halves of the enforcement demo. Both watch
+`kprobe/do_futex`, tag the PI-futex op set (1 = `LOCK_PI`, 2 = `WAIT_REQUEUE_PI`,
+3 = `CMP_REQUEUE_PI`) and act on the trigger, tag 3:
+
+- `ghostlock_enforce_bcc.py` — calls `bpf_send_signal(SIGKILL)` inside the program. No
+  userspace kill loop; measured on `vmnono` with BCC 0.36.0, the trigger returns `rc = -9`.
+- `ghostlock_enforce.py` — Python-BPF has no deny helper, so the program `print`s a
+  `GHOSTLOCK op=… tag=… pid=…` line, the process reads `/sys/kernel/tracing/trace_pipe` and
+  calls `os.kill`. Pid reuse is handled by expiring handled entries for dead pids.
+
+Neither denies the syscall: the signal is delivered after `do_futex` returns. The BCC file
+carries a local `pt_regs_x64` layout because this kernel only forward-declares `pt_regs`.
 
 ## Reproduce one arm
 
