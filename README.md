@@ -32,6 +32,7 @@ slides.html                     the deck — fixed 1280x720 canvas, no build ste
 index.html                      redirect to slides.html
 images/                         deck art
 data/live-code/                 the programs on the code slides, including both GhostLock enforcers
+data/limits/pythonbpf/          compile-only repros for the Part 4 gaps, one per slide p30–p32   (see its README)
 data/raw/experiment/            host, scripts, trigger, programs   (see its README)
 data/raw/experiment/results/    NOT in the tree — download the release asset
 ```
